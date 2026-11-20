@@ -25,8 +25,6 @@ import {
   Swords,
   Trash2,
   Trophy,
-  Volume2,
-  VolumeX,
   X,
 } from 'lucide-react';
 import {
@@ -53,7 +51,6 @@ import {
   scoreLucky9,
 } from '../lib/cards';
 import {
-  isAudioMuted,
   playCardDealBurst,
   playCardDraw,
   playCardDrop,
@@ -62,8 +59,8 @@ import {
   playDiceRoll,
   playMeldChime,
   playWinFanfare,
-  setAudioMuted,
 } from '../lib/audio';
+import { AudioControlButton } from './AudioControlButton';
 import { PlayingCard } from './PlayingCard';
 import {
   isFullscreenActive,
@@ -145,7 +142,6 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const [muted, setMuted] = useState(isAudioMuted());
   const [myFloatingEmoji, setMyFloatingEmoji] = useState<string | null>(null);
   const [opponentEmojis, setOpponentEmojis] = useState<Record<string, string>>({});
   const lastProcessedMsgIdRef = useRef<string | null>(null);
@@ -1410,12 +1406,6 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
     setChatInput('');
   };
 
-  const toggleSound = () => {
-    const next = !muted;
-    setMuted(next);
-    setAudioMuted(next);
-  };
-
   // Bind live timeout handler for every table type when countdown reaches 00:00
   useEffect(() => {
     onTimeoutRef.current = () => {
@@ -1539,14 +1529,7 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
               {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
               <span className="hidden sm:inline">{isFullscreen ? 'Exit Full' : 'Full Screen'}</span>
             </button>
-            <button
-              type="button"
-              onClick={toggleSound}
-              aria-label={muted ? 'Unmute sound' : 'Mute sound'}
-              className="rounded-xl border border-emerald-700/80 bg-[#031c16] p-1.5 sm:p-2 text-emerald-200 hover:text-amber-300 cursor-pointer"
-            >
-              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            </button>
+            <AudioControlButton variant="compact" align="right" />
             <button
               type="button"
               onClick={() => setMilestonesOpen((v) => !v)}

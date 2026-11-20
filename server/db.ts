@@ -362,13 +362,13 @@ function ensureSlotGamesRegistered(): void {
       milestoneTitle: 'Choy Rush 6×5 Staged (Coming Soon)',
     },
     {
-      key: 'choybounty',
-      name: 'Choy Bounty (6×5 Slot · Coming Soon)',
-      short: 'Choy Bounty',
-      enabled: 0,
-      tourneyEnabled: 0,
-      prize: 15000,
-      milestoneTitle: 'Choy Bounty 6×5 Staged (Coming Soon)',
+      key: 'cockfight',
+      name: 'Cockfight (Online Sabong Live)',
+      short: 'Cockfight',
+      enabled: 1,
+      tourneyEnabled: 1,
+      prize: 20000,
+      milestoneTitle: 'Cockfight Arena Live Opened',
     },
   ];
 

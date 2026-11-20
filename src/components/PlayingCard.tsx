@@ -9,6 +9,7 @@ interface PlayingCardProps {
   faceDown?: boolean;
   selected?: boolean;
   compact?: boolean;
+  fanMode?: boolean;
   draggable?: boolean;
   backLabel?: string;
   onClick?: () => void;
@@ -123,6 +124,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
   faceDown = false,
   selected = false,
   compact = false,
+  fanMode = false,
   draggable = false,
   backLabel,
   onClick,
@@ -130,9 +132,11 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
   onDragOver,
   onDrop,
 }) => {
-  const sizeClass = compact
-    ? 'w-[56px] h-[80px] sm:w-[66px] sm:h-[96px]'
-    : 'w-[66px] h-[96px] sm:w-[78px] sm:h-[114px]';
+  const sizeClass = fanMode
+    ? 'w-[58px] h-[84px] sm:w-[70px] sm:h-[102px] md:w-[78px] md:h-[112px]'
+    : compact
+      ? 'w-[52px] h-[74px] sm:w-[62px] sm:h-[90px]'
+      : 'w-[66px] h-[96px] sm:w-[78px] sm:h-[114px]';
 
   if (faceDown || !card) {
     return (
@@ -170,7 +174,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
   const isAce = card.rank === 'A';
   const pips = !courtCard && !isAce ? PIP_LAYOUTS[card.rank] : undefined;
 
-  const meldRing = card.meldGroup
+  const meldRing = card.meldGroup && !fanMode
     ? MELD_RING_COLORS[((card.meldGroup - 1) % (MELD_RING_COLORS.length - 1)) + 1]
     : '';
 
@@ -213,70 +217,97 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
           aria-hidden="true"
         />
 
-        {/* TOP-LEFT TRADITIONAL STACKED INDEX (Rank directly above Suit) */}
+        {/* TOP-LEFT TRADITIONAL STACKED INDEX (Oversized & bold in fanMode so overlapping cards stay 100% legible) */}
         <div
           className={`absolute z-10 flex flex-col items-center leading-none ${
-            compact ? 'top-[3px] left-[3px]' : 'top-[4px] left-[4px]'
+            fanMode
+              ? 'top-[4px] left-[4px] sm:top-[5px] sm:left-[5px]'
+              : compact
+                ? 'top-[3px] left-[3px]'
+                : 'top-[4px] left-[4px]'
           }`}
         >
           <span
-            className={`font-display font-black tracking-tighter leading-[0.95] ${
-              compact
+            className={`font-display font-black tracking-tighter leading-[0.9] ${
+              fanMode
                 ? card.rank === '10'
-                  ? 'text-[10px] sm:text-[11px]'
-                  : 'text-[11px] sm:text-[13px]'
-                : card.rank === '10'
-                  ? 'text-[11px] sm:text-[13px]'
-                  : 'text-[13px] sm:text-[15px]'
+                  ? 'text-[14px] sm:text-[17px] md:text-[19px]'
+                  : 'text-[17px] sm:text-[21px] md:text-[23px]'
+                : compact
+                  ? card.rank === '10'
+                    ? 'text-[10px] sm:text-[11px]'
+                    : 'text-[11px] sm:text-[13px]'
+                  : card.rank === '10'
+                    ? 'text-[11px] sm:text-[13px]'
+                    : 'text-[13px] sm:text-[15px]'
             }`}
           >
             {rankLabel}
           </span>
           <BoldSuitIcon
             suit={card.suit}
-            className={compact ? 'w-[9px] h-[9px] sm:w-[11px] sm:h-[11px] mt-[1px]' : 'w-[11px] h-[11px] sm:w-[13px] sm:h-[13px] mt-[1px]'}
+            className={
+              fanMode
+                ? 'w-[12px] h-[12px] sm:w-[15px] sm:h-[15px] md:w-[16px] md:h-[16px] mt-[2px]'
+                : compact
+                  ? 'w-[9px] h-[9px] sm:w-[11px] sm:h-[11px] mt-[1px]'
+                  : 'w-[11px] h-[11px] sm:w-[13px] sm:h-[13px] mt-[1px]'
+            }
           />
         </div>
 
-        {/* BOTTOM-RIGHT INVERTED STACKED INDEX (180° rotated like a real casino card) */}
-        <div
-          className={`absolute z-10 flex flex-col items-center leading-none rotate-180 ${
-            compact ? 'bottom-[3px] right-[3px]' : 'bottom-[4px] right-[4px]'
-          }`}
-        >
-          <span
-            className={`font-display font-black tracking-tighter leading-[0.95] ${
-              compact
-                ? card.rank === '10'
-                  ? 'text-[10px] sm:text-[11px]'
-                  : 'text-[11px] sm:text-[13px]'
-                : card.rank === '10'
-                  ? 'text-[11px] sm:text-[13px]'
-                  : 'text-[13px] sm:text-[15px]'
+        {/* BOTTOM-RIGHT INVERTED STACKED INDEX (Hidden in fanMode for cleaner classic mobile card face) */}
+        {!fanMode && (
+          <div
+            className={`absolute z-10 flex flex-col items-center leading-none rotate-180 ${
+              compact ? 'bottom-[3px] right-[3px]' : 'bottom-[4px] right-[4px]'
             }`}
           >
-            {rankLabel}
-          </span>
-          <BoldSuitIcon
-            suit={card.suit}
-            className={compact ? 'w-[9px] h-[9px] sm:w-[11px] sm:h-[11px] mt-[1px]' : 'w-[11px] h-[11px] sm:w-[13px] sm:h-[13px] mt-[1px]'}
-          />
-        </div>
+            <span
+              className={`font-display font-black tracking-tighter leading-[0.95] ${
+                compact
+                  ? card.rank === '10'
+                    ? 'text-[10px] sm:text-[11px]'
+                    : 'text-[11px] sm:text-[13px]'
+                  : card.rank === '10'
+                    ? 'text-[11px] sm:text-[13px]'
+                    : 'text-[13px] sm:text-[15px]'
+              }`}
+            >
+              {rankLabel}
+            </span>
+            <BoldSuitIcon
+              suit={card.suit}
+              className={compact ? 'w-[9px] h-[9px] sm:w-[11px] sm:h-[11px] mt-[1px]' : 'w-[11px] h-[11px] sm:w-[13px] sm:h-[13px] mt-[1px]'}
+            />
+          </div>
+        )}
 
-        {/* Meld Group Badge (bottom-left so it never blocks indices) */}
-        {card.meldGroup ? (
+        {/* Meld Group Badge (bottom-left when not in fanMode) */}
+        {card.meldGroup && !fanMode ? (
           <span className="absolute bottom-[3px] left-[3px] z-20 rounded bg-emerald-700 px-1 py-[1px] text-[7px] sm:text-[8px] font-black text-white leading-none shadow">
             M{card.meldGroup}
           </span>
         ) : null}
 
-        {/* REAL CARD CENTER FACE: Court Portrait / Ornate Ace / Authentic 2–10 Pip Grid */}
+        {/* REAL CARD CENTER FACE: Court Portrait / Ornate Ace / Big Center Pip in fanMode / Authentic 2–10 Pip Grid */}
         <div
           className={`absolute inset-0 flex items-center justify-center ${
-            compact ? 'px-[11px] py-[7px] sm:px-[13px] sm:py-[8px]' : 'px-[13px] py-[8px] sm:px-[15px] sm:py-[10px]'
+            fanMode
+              ? 'pl-[18px] pr-[4px] pt-[20px] pb-[6px] sm:pl-[22px] sm:pr-[5px] sm:pt-[24px] sm:pb-[8px]'
+              : compact
+                ? 'px-[11px] py-[7px] sm:px-[13px] sm:py-[8px]'
+                : 'px-[13px] py-[8px] sm:px-[15px] sm:py-[10px]'
           }`}
         >
-          {courtCard ? (
+          {fanMode && !courtCard ? (
+            <div className="w-full h-full flex items-end justify-end pr-[2px] pb-[2px]">
+              <BoldSuitIcon
+                suit={card.suit}
+                className="w-8 h-8 sm:w-10 sm:h-10 md:w-11 md:h-11"
+              />
+            </div>
+          ) : courtCard ? (
             <div
               className={`w-full h-full rounded-[6px] border ${palette.frameBorder} ring-1 ring-inset ring-amber-400/50 bg-gradient-to-b ${palette.frameBg} flex items-center justify-center overflow-hidden shadow-inner relative`}
             >

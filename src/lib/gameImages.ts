@@ -25,4 +25,5 @@ export const GAME_ART_MAP: Record<GameKey, string> = {
   choyimpire: choyimpireArt,
   choyrush: choyrushArt,
   choybounty: choybountyArt,
+  cockfight: betgameArt,
 };

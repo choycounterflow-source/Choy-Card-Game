@@ -9,8 +9,8 @@ import type {
 export const SUPER_ACE_ROWS = 5;
 export const SUPER_ACE_COLS = 6;
 
-// Regular spin win/loss split: 30% win / 70% loss
-export const REGULAR_WIN_RATE = 0.30;
+// Regular spin win/loss split: 15% win / 85% loss
+export const REGULAR_WIN_RATE = 0.15;
 
 // Scatter Free Spin schedule:
 // 1st regular spin -> guaranteed 10 Free Scatter Spins
@@ -28,15 +28,15 @@ export const MULTI_WILD_RATE = 0.25;
 // Buy Free Spin Scatter cost multiplier (Bet ₱1 -> Buy Cost ₱100)
 export const BUY_SPIN_COST_MULTIPLIER = 100;
 
-// Exact Buy Spin Winning Rate vs Result Rate Distribution:
+// Exact Buy Spin Winning Rate vs Result Rate Distribution (Scatter Bonus result rate 5% for winning rate 20%):
 // Winning Rate: 10% + 15% + 20% + 25% + 30% = 100%
-// Result Rate:  40% + 20% + 15% + 15% + 10% = 100%
+// Result Rate:  45% + 20% +  5% + 15% + 15% = 100%
 export const BUY_SPIN_RESULT_TABLE = [
-  { winningRatePct: 10, resultRatePct: 40 },
+  { winningRatePct: 10, resultRatePct: 45 },
   { winningRatePct: 15, resultRatePct: 20 },
-  { winningRatePct: 20, resultRatePct: 15 },
+  { winningRatePct: 20, resultRatePct: 5 },
   { winningRatePct: 25, resultRatePct: 15 },
-  { winningRatePct: 30, resultRatePct: 10 },
+  { winningRatePct: 30, resultRatePct: 15 },
 ] as const;
 
 export function rollBuySpinWinningRatePct(): number {

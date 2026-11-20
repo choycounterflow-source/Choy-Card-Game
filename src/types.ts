@@ -12,7 +12,8 @@ export type GameKey =
   | 'pinatachoy'
   | 'choyimpire'
   | 'choyrush'
-  | 'choybounty';
+  | 'choybounty'
+  | 'cockfight';
 
 export type SlotGameKey =
   | 'superace'

@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Crown, Sparkles, Star, Trophy } from 'lucide-react';
 import type { SlotCelebrationAudioTier } from '../lib/audio';
-import { playOdometerTick } from '../lib/audio';
+import { OdometerCounter } from './OdometerCounter';
 
 export type SlotWinTier = 'big' | 'super' | 'excellent';
 
@@ -183,55 +183,20 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
   const visualMode: keyof typeof BALLOON_PALETTES =
     payload.tier ?? (payload.kind === 'scatter' ? 'scatter' : 'bonus');
 
-  const [displayAmount, setDisplayAmount] = useState<number>(0);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
 
-  // Smooth requestAnimationFrame counting-up peso odometer
-  useEffect(() => {
-    const target = payload.amount ?? 0;
-    if (target <= 0) {
-      setDisplayAmount(0);
-      setIsCompleted(true);
-      return;
-    }
-    setIsCompleted(false);
-
-    const baseDuration =
+  const durationMs = useMemo(() => {
+    const base =
       visualMode === 'excellent'
         ? 1350
         : visualMode === 'super'
           ? 1100
           : 850;
-    const durationMs = turboMode ? Math.round(baseDuration * 0.55) : baseDuration;
-    const startTs = performance.now();
-    let rafId = 0;
-
-    const tick = (now: number) => {
-      const progress = Math.min(1, (now - startTs) / durationMs);
-      // Cubic ease-out so numbers race up fast then land crisply
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const currentVal = target * eased;
-      setDisplayAmount(Number(currentVal.toFixed(2)));
-
-      if (progress < 1) {
-        if (Math.floor(currentVal * 5) % 3 === 0) {
-          playOdometerTick();
-        }
-        rafId = requestAnimationFrame(tick);
-      } else {
-        setDisplayAmount(target);
-        setIsCompleted(true);
-      }
-    };
-
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  }, [payload.amount, visualMode, turboMode]);
+    return turboMode ? Math.round(base * 0.55) : base;
+  }, [visualMode, turboMode]);
 
   const handleAction = () => {
-    const target = payload.amount ?? 0;
     if (!isCompleted) {
-      setDisplayAmount(target);
       setIsCompleted(true);
     } else {
       onDismiss();
@@ -570,7 +535,12 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
               WIN AMOUNT
             </span>
             <p className="font-mono-num text-3xl sm:text-4xl font-black tracking-tight text-yellow-100 drop-shadow-[0_2px_14px_rgba(251,191,36,0.95)]">
-              +₱{displayAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <OdometerCounter
+                targetValue={payload.amount ?? 0}
+                prefix="+₱"
+                duration={durationMs}
+                onComplete={() => setIsCompleted(true)}
+              />
             </p>
           </motion.div>
         )}

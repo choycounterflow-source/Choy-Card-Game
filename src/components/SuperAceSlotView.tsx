@@ -2,20 +2,22 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Coins,
-  Crown,
+  Flame,
+  Info,
   Maximize2,
   Minimize2,
-  Minus,
   Play,
   Plus,
   Repeat,
   RotateCw,
+  Settings,
   ShoppingBag,
   Sparkles,
   Square,
-  Volume2,
-  VolumeX,
+  Wifi,
   X,
   Zap,
 } from 'lucide-react';
@@ -31,7 +33,6 @@ import {
   type UserProfile,
 } from '../types';
 import {
-  isAudioMuted,
   playCardBreak,
   playChipClink,
   playGoldenTransform,
@@ -39,16 +40,25 @@ import {
   playScatterDrop,
   playSlotCelebrationFanfare,
   playSlotSpinStart,
-  setAudioMuted,
 } from '../lib/audio';
+import { AudioControlButton } from './AudioControlButton';
 import {
   classifySlotWinTier,
   SlotWinCelebration,
   type SlotCelebrationPayload,
   type SlotWinTier,
 } from './SlotWinCelebration';
-import { BoldSuitIcon, CourtPortrait } from './CardArt';
-import { GAME_ART_MAP } from '../lib/gameImages';
+import { OdometerCounter } from './OdometerCounter';
+import {
+  BoldSuitIcon,
+  SuperAceJackPortrait,
+  SuperAceKingPortrait,
+  SuperAceQueenPortrait,
+  SuperAceScatterEmblem,
+  SuperAceSpadeEmblem,
+  SuperAceSuitPip,
+  SuperAceWildCrown,
+} from './CardArt';
 import {
   isFullscreenActive,
   toggleGameFullscreenLandscape,
@@ -62,7 +72,7 @@ interface SuperAceSlotViewProps {
   onOpenCashIn: () => void;
 }
 
-// Flash (single ⚡) = Slow row-by-row drop | Double Flash (⚡⚡) = Fast drop
+// Flash (single ⚡) = Slow row-by-row drop | Turbo (🔥⚡) = Fast drop
 type SlotSpinSpeed = 'slow' | 'fast';
 
 interface SpeedProfile {
@@ -92,7 +102,6 @@ const SPEED_PROFILES: Record<SlotSpinSpeed, SpeedProfile> = {
     clearDurationSec: 0.3,
     clearRowStepSec: 0.068,
     clearColStepSec: 0.012,
-    // Row 1 drops down -> then Row 2 -> Row 3 -> Row 4 -> Row 5 slowly & clearly!
     dropRowStepMs: 240,
     dropRowStepSec: 0.24,
     dropColStepSec: 0.016,
@@ -107,7 +116,7 @@ const SPEED_PROFILES: Record<SlotSpinSpeed, SpeedProfile> = {
     autoDelayMs: 650,
   },
   fast: {
-    label: 'Fast Spin',
+    label: 'Turbo Spin',
     clearMinMs: 185,
     clearDurationSec: 0.16,
     clearRowStepSec: 0.028,
@@ -133,9 +142,23 @@ const BUY_SPIN_MULTIPLIER = 100;
 
 const REGULAR_MULTS = [1, 2, 3, 4, 5];
 const FREE_SPIN_MULTS = [2, 4, 6, 8, 10];
-
-// Big Win / Super Win / Excellent Win highlight duration: full 5 seconds with sparks!
 const BIG_WIN_HIGHLIGHT_MS = 5000;
+const INTRO_HIDDEN_KEY = 'choy_superace_intro_hidden_v1';
+
+const INTRO_SLIDES = [
+  {
+    caption: 'After the Golden poker wins, it will turn into wild in the same place.',
+    badge: 'GOLDEN POKER → WILD',
+  },
+  {
+    caption: 'Consecutive cascade eliminations boost Combo Multipliers up to ×5 (×10 in Free Spins)!',
+    badge: 'COMBO MULTIPLIER ×1–×10',
+  },
+  {
+    caption: 'Land 3 Scatters or tap BUY BONUS to trigger 10 Free Scatter Spins instantly!',
+    badge: '10 FREE SCATTER SPINS',
+  },
+];
 
 function buildPreviewGrid(): SuperAceCell[][] {
   const sample: SuperAceSymbol[] = ['ACE', 'KING', 'QUEEN', 'JACK', 'SPADE', 'HEART', 'CLUB', 'DIAMOND'];
@@ -144,11 +167,15 @@ function buildPreviewGrid(): SuperAceCell[][] {
   for (let r = 0; r < ROWS; r++) {
     const row: SuperAceCell[] = [];
     for (let c = 0; c < COLS; c++) {
-      const sym = sample[(r * 3 + c * 5) % sample.length];
+      // Showcase iconic Super Ace column rhythm on initial load: A, K (gold top), Q, J, ♠, ♥
+      const sym =
+        r < 3 && c < 5
+          ? (['ACE', 'KING', 'QUEEN', 'JACK', 'SPADE'] as SuperAceSymbol[])[c]
+          : sample[(r * 3 + c * 5) % sample.length];
       row.push({
         id: `init-${r}-${c}-${seq++}`,
         symbol: sym,
-        isGolden: (r === 1 && c === 2) || (r === 2 && c === 3),
+        isGolden: (r === 0 && c === 1) || (r === 2 && c === 3),
         isWild: false,
         isScatter: false,
       });
@@ -180,6 +207,19 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     buyBonusRatePct: 0,
   });
 
+  // Intro Feature Splash (matches reference Screenshot_20261121-025009)
+  const [showIntroSplash, setShowIntroSplash] = useState<boolean>(() => {
+    if (gameKey !== 'superace') return false;
+    try {
+      return localStorage.getItem(INTRO_HIDDEN_KEY) !== 'true';
+    } catch {
+      return true;
+    }
+  });
+  const [dontShowIntroNextTime, setDontShowIntroNextTime] = useState<boolean>(false);
+  const [introProgress, setIntroProgress] = useState<number>(18);
+  const [introSlide, setIntroSlide] = useState<number>(0);
+
   const [isSpinning, setIsSpinning] = useState(false);
   const [reelPhase, setReelPhase] = useState<'idle' | 'clearing' | 'dropping' | 'cascading'>('idle');
   const [spinSeq, setSpinSeq] = useState<number>(0);
@@ -197,9 +237,8 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
   const [autoMenuOpen, setAutoMenuOpen] = useState<boolean>(false);
   const [betDrawerOpen, setBetDrawerOpen] = useState<boolean>(false);
   const [buyModalOpen, setBuyModalOpen] = useState<boolean>(false);
-  // Default Slow (⚡) so row-by-row slow card drop is clearly visible; switchable to Fast (⚡⚡)
+  const [infoModalOpen, setInfoModalOpen] = useState<boolean>(false);
   const [spinSpeed, setSpinSpeed] = useState<SlotSpinSpeed>('slow');
-  const [muted, setMuted] = useState<boolean>(isAudioMuted());
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() => isFullscreenActive());
 
   const mountedRef = useRef(true);
@@ -218,6 +257,34 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
   useEffect(() => {
     slotStateRef.current = slotState;
   }, [slotState]);
+
+  // Animate Intro Splash loading progress smoothly to 100%
+  useEffect(() => {
+    if (!showIntroSplash) return;
+    setIntroProgress(22);
+    const interval = setInterval(() => {
+      setIntroProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          return 100;
+        }
+        return Math.min(100, prev + 16);
+      });
+    }, 180);
+    return () => clearInterval(interval);
+  }, [showIntroSplash]);
+
+  const handleCloseIntro = () => {
+    playChipClink();
+    if (dontShowIntroNextTime) {
+      try {
+        localStorage.setItem(INTRO_HIDDEN_KEY, 'true');
+      } catch {
+        // ignore storage restrictions
+      }
+    }
+    setShowIntroSplash(false);
+  };
 
   useEffect(() => {
     const syncFs = () => setIsFullscreen(isFullscreenActive());
@@ -330,12 +397,6 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     }
   }, []);
 
-  const handleToggleMute = () => {
-    const next = !muted;
-    setMuted(next);
-    setAudioMuted(next);
-  };
-
   // Shared animation runner for both normal/free spins and Buy Free Spin Scatter entry
   const animateSpinResult = useCallback(
     async (
@@ -346,14 +407,12 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     ) => {
       if (!mountedRef.current) return;
 
-      // Ensure old cards sweep down cleanly row-by-row before new rows drop in
       const elapsedClear = performance.now() - clearStartAt;
       if (elapsedClear < speed.clearMinMs) {
         await new Promise<void>((resolve) => setTimeout(resolve, speed.clearMinMs - elapsedClear));
       }
       if (!mountedRef.current) return;
 
-      // Drop new cards down PER ROW sequentially: Row 1 -> Row 2 -> Row 3 -> Row 4 -> Row 5
       setSpinSeq((prev) => prev + 1);
       setReelPhase('dropping');
       setGrid(result.initialGrid);
@@ -369,7 +428,6 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
       if (!mountedRef.current) return;
       setReelPhase('cascading');
 
-      // Highlight Scatter drops
       if (result.scatterPositions.length > 0) {
         const sKeys = new Set<string>();
         for (let i = 0; i < result.scatterPositions.length; i++) {
@@ -381,7 +439,6 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
         }
       }
 
-      // Play cascading wins
       let runningWin = 0;
       for (let idx = 0; idx < result.cascades.length; idx++) {
         if (!mountedRef.current) return;
@@ -428,14 +485,13 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
       const finishedFreeSpinRound =
         previousFreeSpinsRemaining > 0 && result.state.freeSpinsRemaining === 0;
 
-      // 1) Scatter Free Spins triggered!
       if (result.triggeredFreeSpins > 0) {
         await presentCelebration(
           {
             kind: 'scatter',
             tier: spinTier,
             eyebrow: result.wasBuySpin
-              ? `BUY FREE SPIN SCATTER (₱${(result.buyCost ?? 0).toFixed(0)})`
+              ? `BUY BONUS SCATTER (₱${(result.buyCost ?? 0).toFixed(0)})`
               : 'FREE SCATTER SPIN TRIGGERED',
             title: `${result.triggeredFreeSpins} FREE SPINS!`,
             subtitle:
@@ -448,7 +504,6 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
           spinTier ? BIG_WIN_HIGHLIGHT_MS : 2600,
         );
       } else if (spinTier) {
-        // 2) Big Win / Super Win / Excellent Win -> ALWAYS highlighted with sparks for 5 FULL SECONDS!
         await presentCelebration(
           {
             kind: 'win',
@@ -466,7 +521,6 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
         );
       }
 
-      // 3) Free Scatter Spins Round Complete -> Show Total Bonus Win for 5s if Big/Super/Excellent!
       if (finishedFreeSpinRound && result.state.freeSpinTotalWin > 0) {
         const bonusTier = classifySlotWinTier(result.state.freeSpinTotalWin, result.betAmount);
         await presentCelebration(
@@ -490,6 +544,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     if (isSpinningRef.current) return;
     setErrorMsg('');
     setBetDrawerOpen(false);
+    setAutoMenuOpen(false);
     setBuyModalOpen(false);
 
     const currentSlotState = slotStateRef.current;
@@ -497,7 +552,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     const betToSend = freeSpinNow ? currentSlotState.freeSpinBet : SUPER_ACE_BETS[betIndex];
 
     if (!freeSpinNow && user.wallet_balance < betToSend) {
-      setErrorMsg(`Insufficient wallet balance for ₱${betToSend} bet. Ask Admin to add coins or lower your bet.`);
+      setErrorMsg(`Insufficient wallet balance for ₱${betToSend} bet. Cash In or choose a lower bet.`);
       stopAutoSpin();
       return;
     }
@@ -541,7 +596,6 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
       setReelPhase('idle');
       setScatterKeys(new Set());
 
-      // Continue auto-spin OR auto-play remaining Free Scatter Spins if Auto is active
       if (mountedRef.current && autoSpinsRef.current > 0) {
         const nextRemaining =
           result.state.freeSpinsRemaining > 0
@@ -583,7 +637,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     const betToSend = SUPER_ACE_BETS[betIndex];
     const cost = Number((betToSend * BUY_SPIN_MULTIPLIER).toFixed(2));
     if (user.wallet_balance < cost) {
-      setErrorMsg(`Insufficient wallet balance. Need ₱${cost.toFixed(2)} to Buy Free Spin Scatter at ₱${betToSend} bet.`);
+      setErrorMsg(`Insufficient wallet balance. Need ₱${cost.toFixed(2)} to Buy Bonus at ₱${betToSend} bet.`);
       return;
     }
 
@@ -609,7 +663,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
       });
       const data = await res.json();
       if (!res.ok) {
-        setErrorMsg(data.error || 'Could not complete Buy Free Spin Scatter.');
+        setErrorMsg(data.error || 'Could not complete Buy Bonus.');
         isSpinningRef.current = false;
         setIsSpinning(false);
         setReelPhase('idle');
@@ -624,7 +678,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
       setReelPhase('idle');
       setScatterKeys(new Set());
     } catch {
-      setErrorMsg('Network error during Buy Spin. Please try again.');
+      setErrorMsg('Network error during Buy Bonus. Please try again.');
       isSpinningRef.current = false;
       setIsSpinning(false);
       setReelPhase('idle');
@@ -633,6 +687,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
 
   const startAutoSpin = (count: number) => {
     setAutoMenuOpen(false);
+    setBetDrawerOpen(false);
     setAutoSpinsLeft(count);
     autoSpinsRef.current = count;
     if (!isSpinningRef.current) {
@@ -646,842 +701,1052 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     setBetIndex(idx);
   };
 
+  const renderSuperAceCardFace = (cell: SuperAceCell) => {
+    if (cell.isScatter) {
+      return (
+        <div className="w-full h-full flex items-center justify-center p-0.5">
+          <SuperAceScatterEmblem className="w-[94%] h-[94%] drop-shadow" />
+        </div>
+      );
+    }
+
+    if (cell.symbol === 'WILD_BIG' || cell.symbol === 'WILD_SMALL') {
+      return (
+        <div className="w-full h-full flex items-center justify-center p-0.5">
+          <SuperAceWildCrown
+            isMulti={cell.symbol === 'WILD_BIG'}
+            className="w-[95%] h-[95%] drop-shadow"
+          />
+        </div>
+      );
+    }
+
+    if (cell.symbol === 'ACE') {
+      return (
+        <>
+          <span className="absolute top-[2px] left-[4px] z-10 font-serif text-[13px] sm:text-[17px] font-black leading-none text-[#14171f]">
+            A
+          </span>
+          <div className="w-full h-full flex items-center justify-center pt-1.5 pb-0.5 px-1">
+            <SuperAceSpadeEmblem className="w-[82%] h-[82%] max-h-[68px]" />
+          </div>
+        </>
+      );
+    }
+
+    if (cell.symbol === 'KING') {
+      return (
+        <>
+          <span className="absolute top-[2px] left-[4px] z-10 font-serif text-[13px] sm:text-[17px] font-black leading-none text-[#14171f]">
+            K
+          </span>
+          <div className="w-full h-full flex items-end justify-center pt-1 px-0.5">
+            <SuperAceKingPortrait className="w-[94%] h-[94%]" />
+          </div>
+        </>
+      );
+    }
+
+    if (cell.symbol === 'QUEEN') {
+      return (
+        <>
+          <span className="absolute top-[2px] left-[4px] z-10 font-serif text-[13px] sm:text-[17px] font-black leading-none text-[#14171f]">
+            Q
+          </span>
+          <div className="w-full h-full flex items-end justify-center pt-1 px-0.5">
+            <SuperAceQueenPortrait className="w-[94%] h-[94%]" />
+          </div>
+        </>
+      );
+    }
+
+    if (cell.symbol === 'JACK') {
+      return (
+        <>
+          <span className="absolute top-[2px] left-[4px] z-10 font-serif text-[13px] sm:text-[17px] font-black leading-none text-[#14171f]">
+            J
+          </span>
+          <div className="w-full h-full flex items-end justify-center pt-1 px-0.5">
+            <SuperAceJackPortrait className="w-[94%] h-[94%]" />
+          </div>
+        </>
+      );
+    }
+
+    const suitMap: Record<'SPADE' | 'HEART' | 'DIAMOND' | 'CLUB', '♠' | '♥' | '♦' | '♣'> = {
+      SPADE: '♠',
+      HEART: '♥',
+      DIAMOND: '♦',
+      CLUB: '♣',
+    };
+    const pipSuit = suitMap[cell.symbol as keyof typeof suitMap] ?? '♠';
+
+    return (
+      <div className="w-full h-full flex items-center justify-center p-2">
+        <SuperAceSuitPip suit={pipSuit} className="w-[62%] h-[62%] max-w-[44px] max-h-[44px]" />
+      </div>
+    );
+  };
+
   return (
-    <div className="fixed inset-0 z-30 h-[100dvh] w-screen bg-[#02140f] flex flex-col overflow-hidden p-1.5 sm:p-2.5 gap-1.5 sm:gap-2">
-      {/* Compact Full-Width Top Game Bar */}
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-800/90 bg-[#052920] px-2.5 sm:px-4 py-1.5 sm:py-2 shadow-lg">
-        <div className="flex items-center gap-2 sm:gap-3">
+    <div className="fixed inset-0 z-30 h-[100dvh] w-screen bg-[#090b1a] flex flex-col overflow-hidden select-none">
+      {/* Subtle Royal Damask Dark Navy Wallpaper Backdrop (matching reference) */}
+      <div
+        className="pointer-events-none fixed inset-0 opacity-25"
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 25% 25%, #2a3166 2px, transparent 2.5px), radial-gradient(circle at 75% 75%, #222958 2px, transparent 2.5px), linear-gradient(135deg, #0d1026 0%, #070917 100%)',
+          backgroundSize: '26px 26px, 26px 26px, 100% 100%',
+        }}
+        aria-hidden="true"
+      />
+
+      {/* ==================== SUPER ACE INTRO SPLASH OVERLAY (Reference Screenshot 1) ==================== */}
+      <AnimatePresence>
+        {showIntroSplash && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.03 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-between overflow-hidden px-4 py-4 sm:py-6"
+            style={{
+              background:
+                'radial-gradient(circle at 50% 42%, #e6f466 0%, #8ec736 32%, #1d8a35 68%, #0c4d1f 100%)',
+            }}
+          >
+            {/* Sunburst Rays */}
+            <div
+              className="pointer-events-none absolute inset-0 opacity-30"
+              style={{
+                backgroundImage:
+                  'repeating-conic-gradient(from 0deg at 50% 44%, rgba(255,253,190,0.45) 0deg 10deg, transparent 10deg 22deg)',
+              }}
+              aria-hidden="true"
+            />
+
+            {/* Floating Golden Coins Around Corners */}
+            <div className="pointer-events-none absolute -top-5 -left-4 h-24 w-24 rounded-full border-4 border-amber-200 bg-gradient-to-br from-yellow-200 via-amber-400 to-amber-600 shadow-2xl flex items-center justify-center -rotate-12 opacity-90">
+              <span className="font-display text-4xl font-black text-amber-100 drop-shadow">$</span>
+            </div>
+            <div className="pointer-events-none absolute top-10 -right-6 h-20 w-20 rounded-full border-4 border-amber-200 bg-gradient-to-br from-yellow-200 via-amber-400 to-amber-600 shadow-2xl flex items-center justify-center rotate-12 opacity-90">
+              <span className="font-display text-3xl font-black text-amber-100 drop-shadow">$</span>
+            </div>
+            <div className="pointer-events-none absolute bottom-16 -left-5 h-20 w-20 rounded-full border-4 border-amber-200 bg-gradient-to-br from-yellow-200 via-amber-400 to-amber-600 shadow-2xl flex items-center justify-center rotate-12 opacity-80">
+              <span className="font-display text-3xl font-black text-amber-100 drop-shadow">$</span>
+            </div>
+            <div className="pointer-events-none absolute -bottom-4 -right-3 h-24 w-24 rounded-full border-4 border-amber-200 bg-gradient-to-br from-yellow-200 via-amber-400 to-amber-600 shadow-2xl flex items-center justify-center -rotate-12 opacity-85">
+              <span className="font-display text-4xl font-black text-amber-100 drop-shadow">$</span>
+            </div>
+
+            {/* Top Bar */}
+            <div className="relative z-10 w-full max-w-md flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  stopAutoSpin();
+                  onExit();
+                }}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/30 bg-black/40 text-white hover:bg-black/60 cursor-pointer"
+                aria-label="Back to lobby"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <span className="rounded-full border border-amber-200/70 bg-black/35 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-amber-200">
+                CHOY SLOT ARENA
+              </span>
+            </div>
+
+            {/* Center Feature Showcase */}
+            <div className="relative z-10 w-full max-w-md flex flex-col items-center text-center gap-3 my-auto">
+              {/* Metallic Beveled SuperAce Logo */}
+              <div className="space-y-1">
+                <h1
+                  className="font-display text-4xl sm:text-5xl font-black tracking-tight bg-gradient-to-b from-[#fffce0] via-[#ffd76a] to-[#b36c12] bg-clip-text text-transparent drop-shadow-[0_3px_0_rgba(45,20,0,0.95)]"
+                  style={{ WebkitTextStroke: '1px #3b1c04' }}
+                >
+                  SuperAce
+                </h1>
+                {/* Volatility Chili Meter */}
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-black/25 px-3 py-0.5">
+                  <span className="text-xs font-bold text-lime-100">Volatility:</span>
+                  <div className="flex items-center gap-0.5 text-sm leading-none">
+                    <span className="drop-shadow">🌶️</span>
+                    <span className="drop-shadow">🌶️</span>
+                    <span className="opacity-35 grayscale">🌶️</span>
+                    <span className="opacity-35 grayscale">🌶️</span>
+                    <span className="opacity-35 grayscale">🌶️</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Feature Demo Card Board with Prev/Next Arrows */}
+              <div className="relative w-full flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIntroSlide((s) => (s - 1 + INTRO_SLIDES.length) % INTRO_SLIDES.length)}
+                  className="p-1.5 text-amber-200 hover:text-white cursor-pointer"
+                  aria-label="Previous feature slide"
+                >
+                  <ChevronLeft className="h-7 w-7 drop-shadow" />
+                </button>
+
+                <div className="relative w-[240px] sm:w-[270px] rounded-xl border-2 border-amber-300/90 bg-[#0b3e44] p-1.5 shadow-[0_14px_34px_rgba(0,0,0,0.5)]">
+                  {/* 4×3 Mini Classic Poker Grid */}
+                  <div className="grid grid-cols-4 gap-1">
+                    {(['KING', 'ACE', 'KING', 'DIAMOND', 'ACE', 'QUEEN', 'ACE', 'HEART', 'KING', 'KING', 'QUEEN', 'WILD_SMALL'] as SuperAceSymbol[]).map(
+                      (sym, idx) => {
+                        const isGoldWildDemo = idx === 3 || idx === 10 || idx === 11;
+                        return (
+                          <div
+                            key={idx}
+                            className={`relative aspect-[3/4] rounded-md overflow-hidden flex items-center justify-center ${
+                              isGoldWildDemo && introSlide === 0
+                                ? 'bg-gradient-to-b from-amber-200 via-yellow-300 to-amber-500 ring-2 ring-yellow-200 shadow-[0_0_12px_rgba(250,204,21,0.85)]'
+                                : 'bg-gradient-to-b from-[#f7f9fc] to-[#dde3ee] border border-slate-400/60'
+                            }`}
+                          >
+                            {isGoldWildDemo && introSlide === 0 ? (
+                              <SuperAceWildCrown className="w-[92%] h-[92%]" />
+                            ) : sym === 'ACE' ? (
+                              <SuperAceSpadeEmblem className="w-[80%] h-[80%]" />
+                            ) : sym === 'KING' ? (
+                              <SuperAceKingPortrait className="w-[92%] h-[92%]" />
+                            ) : sym === 'QUEEN' ? (
+                              <SuperAceQueenPortrait className="w-[92%] h-[92%]" />
+                            ) : sym === 'HEART' ? (
+                              <SuperAceSuitPip suit="♥" className="w-[62%] h-[62%]" />
+                            ) : (
+                              <SuperAceSuitPip suit="♦" className="w-[62%] h-[62%]" />
+                            )}
+                          </div>
+                        );
+                      }
+                    )}
+                  </div>
+
+                  {/* Floating Featured Golden WILD Popout & Curved Arrow Overlay (Slide 0) */}
+                  {introSlide === 0 && (
+                    <motion.div
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 1.8, repeat: Infinity }}
+                      className="pointer-events-none absolute top-[18%] left-[14%] w-[86px] sm:w-[98px] aspect-[3/4] rounded-xl border-2 border-yellow-100 bg-gradient-to-b from-yellow-200 via-amber-400 to-orange-500 p-1 shadow-[0_0_24px_rgba(250,204,21,0.9)]"
+                    >
+                      <SuperAceWildCrown className="w-full h-full" />
+                    </motion.div>
+                  )}
+
+                  {introSlide === 1 && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 backdrop-blur-[1px] rounded-lg p-3 gap-2">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-amber-300">
+                        Combo Multipliers
+                      </span>
+                      <div className="flex items-center gap-1.5 rounded-full border-2 border-amber-300 bg-gradient-to-b from-amber-300 via-yellow-500 to-amber-700 px-3 py-1 shadow-lg">
+                        {[1, 2, 3, 5].map((m, i) => (
+                          <span
+                            key={m}
+                            className={`font-display text-sm font-black ${
+                              i === 3 ? 'text-red-700 scale-110' : 'text-amber-950'
+                            }`}
+                          >
+                            ×{m}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-200">
+                        Doubled to ×2 · ×4 · ×6 · ×8 · ×10 in Free Spins!
+                      </span>
+                    </div>
+                  )}
+
+                  {introSlide === 2 && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 backdrop-blur-[1px] rounded-lg p-3 gap-2">
+                      <div className="flex items-center gap-2">
+                        <SuperAceScatterEmblem className="w-12 h-12" />
+                        <SuperAceScatterEmblem className="w-14 h-14" />
+                        <SuperAceScatterEmblem className="w-12 h-12" />
+                      </div>
+                      <span className="rounded-lg bg-amber-400 px-2.5 py-0.5 text-xs font-black text-emerald-950">
+                        10 FREE SPINS + BUY BONUS
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIntroSlide((s) => (s + 1) % INTRO_SLIDES.length)}
+                  className="p-1.5 text-amber-200 hover:text-white cursor-pointer"
+                  aria-label="Next feature slide"
+                >
+                  <ChevronRight className="h-7 w-7 drop-shadow" />
+                </button>
+              </div>
+
+              {/* Caption & Pagination Dots */}
+              <div className="space-y-2 max-w-xs">
+                <p className="text-xs sm:text-sm font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)] leading-snug">
+                  {INTRO_SLIDES[introSlide].caption}
+                </p>
+                <div className="flex items-center justify-center gap-1.5">
+                  {INTRO_SLIDES.map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setIntroSlide(i)}
+                      aria-label={`Slide ${i + 1}`}
+                      className={`h-2 rounded-full transition-all cursor-pointer ${
+                        introSlide === i ? 'w-5 bg-amber-300' : 'w-2 bg-amber-100/45'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Loading Bar, CTA & "Don't show next time" */}
+            <div className="relative z-10 w-full max-w-xs flex flex-col items-center gap-2.5 pb-1">
+              <div className="w-full space-y-1">
+                <div className="h-3 w-full overflow-hidden rounded-full border border-emerald-950/70 bg-black/55 p-[2px]">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-amber-300 transition-all duration-200"
+                    style={{ width: `${introProgress}%` }}
+                  />
+                </div>
+                <p className="text-center text-xs font-bold text-white drop-shadow">
+                  {introProgress < 100 ? `Loading... ${introProgress}%` : 'Ready to Play!'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCloseIntro}
+                className="w-full rounded-2xl border-2 border-amber-200 bg-gradient-to-b from-yellow-300 via-amber-400 to-orange-500 py-2.5 font-display text-base font-black uppercase tracking-wide text-amber-950 shadow-[0_6px_20px_rgba(0,0,0,0.45)] hover:brightness-105 active:scale-95 transition cursor-pointer"
+              >
+                {introProgress < 100 ? 'Skip & Play Now' : 'Play SuperAce'}
+              </button>
+
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-white/95 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={dontShowIntroNextTime}
+                  onChange={(e) => setDontShowIntroNextTime(e.target.checked)}
+                  className="h-4 w-4 rounded border-white/60 accent-amber-400 cursor-pointer"
+                />
+                Don&apos;t show next time
+              </label>
+
+              <div className="pt-1 text-center">
+                <span className="font-display text-sm font-black tracking-widest bg-gradient-to-b from-amber-200 to-amber-500 bg-clip-text text-transparent">
+                  CHOY CARD GAME
+                </span>
+                <p className="text-[9px] font-semibold tracking-wider text-white/75 uppercase">
+                  Fair Certified RNG · 6×5 Cascading Card Reels
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== TOP ROYAL HEADER BAR (Back + BUY BONUS Ruby Orb + Audio/FS) ==================== */}
+      <div className="relative z-20 shrink-0 w-full max-w-[560px] mx-auto flex items-center justify-between px-3 pt-2 pb-1.5">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => {
               stopAutoSpin();
               onExit();
             }}
-            className="inline-flex items-center gap-1 rounded-xl border border-emerald-700 bg-[#031c16] px-2.5 py-1.5 text-xs font-bold text-emerald-100 hover:border-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+            title="Back to Lobby"
+            aria-label="Back to Lobby"
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-indigo-400/35 bg-[#121633]/90 text-slate-200 hover:border-amber-400 hover:text-amber-300 transition cursor-pointer shadow"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Lobby
-          </button>
-
-          <img
-            src={GAME_ART_MAP[gameKey]}
-            alt={theme.title}
-            className="h-8 w-10 sm:h-9 sm:w-12 rounded-lg object-cover border border-amber-400/60 shadow shrink-0"
-          />
-
-          <div>
-            <h1 className="font-display text-sm sm:text-lg font-extrabold text-amber-400 leading-tight flex items-center gap-1.5">
-              <Crown className="h-4 w-4 text-amber-400 shrink-0" />
-              {theme.title}
-            </h1>
-            <p className="text-[10px] sm:text-[11px] text-emerald-300 leading-tight">
-              {isFreeSpinMode
-                ? `FREE SCATTER MODE · ${slotState.freeSpinsRemaining}/${slotState.freeSpinsTotal} Spins Left · Bonus ₱${slotState.freeSpinTotalWin.toFixed(2)}`
-                : '6×5 Cascading Reels · Wild & Multi Wild · Scatter Free Spins'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <div className="text-right pr-1">
-            <span className="block text-[9px] sm:text-[10px] text-emerald-400 leading-none">
-              Wallet · VIP {user.vip_level}
-            </span>
-            <span className="font-mono-num text-sm sm:text-base font-extrabold text-amber-300">
-              ₱{user.wallet_balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={onOpenCashIn}
-            className="inline-flex items-center gap-1 rounded-xl bg-amber-400 px-2.5 sm:px-3 py-1.5 text-xs font-extrabold text-emerald-950 hover:bg-amber-300 transition-colors cursor-pointer"
-          >
-            <Coins className="h-3.5 w-3.5" />
-            Cash In
+            <ArrowLeft className="h-4 w-4" />
           </button>
 
           <button
             type="button"
             onClick={handleToggleFullscreen}
-            title={isFullscreen ? 'Exit Full Screen' : 'Full Screen Landscape'}
-            aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen landscape'}
-            className={`inline-flex items-center gap-1 rounded-xl border px-2 py-1.5 text-[11px] font-bold transition-colors cursor-pointer ${
+            title={isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
+            aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
+            className={`flex h-9 w-9 items-center justify-center rounded-xl border transition cursor-pointer ${
               isFullscreen
                 ? 'border-amber-400 bg-amber-400/20 text-amber-200'
-                : 'border-emerald-700 bg-[#031c16] text-emerald-200 hover:border-amber-400 hover:text-amber-300'
+                : 'border-indigo-400/35 bg-[#121633]/90 text-slate-200 hover:border-amber-400'
             }`}
           >
-            {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-            <span className="hidden md:inline">{isFullscreen ? 'Exit Full' : 'Full Screen'}</span>
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
 
-          <button
-            type="button"
-            onClick={handleToggleMute}
-            aria-label={muted ? 'Unmute slot audio' : 'Mute slot audio'}
-            className="rounded-xl border border-emerald-700 bg-[#031c16] p-1.5 sm:p-2 text-emerald-200 hover:border-amber-400 hover:text-amber-300 cursor-pointer"
-          >
-            {muted ? <VolumeX className="h-4 w-4 text-red-400" /> : <Volume2 className="h-4 w-4 text-amber-300" />}
-          </button>
+          <AudioControlButton variant="compact" align="left" />
         </div>
+
+        {/* Center Free Spin Status Pill when active */}
+        {isFreeSpinMode && (
+          <div className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-500/25 px-2.5 py-1 font-mono-num text-[10px] sm:text-xs font-black text-amber-200 shadow-lg">
+            <Sparkles className="h-3 w-3 text-amber-300" />
+            FREE {slotState.freeSpinsRemaining}/{slotState.freeSpinsTotal}
+          </div>
+        )}
+
+        {/* Top-Right Ruby-Gold BUY BONUS Orb (matches Screenshot_20261121-025033!) */}
+        <button
+          type="button"
+          disabled={isSpinning || isFreeSpinMode}
+          onClick={() => {
+            playChipClink();
+            setBuyModalOpen(true);
+          }}
+          className="relative group flex h-12 w-12 sm:h-14 sm:w-14 flex-col items-center justify-center rounded-full border-2 border-amber-300 bg-gradient-to-br from-rose-500 via-red-600 to-red-900 shadow-[0_0_20px_rgba(239,68,68,0.65)] hover:scale-105 active:scale-95 disabled:opacity-45 transition cursor-pointer"
+          title={`Buy Free Spin Scatter (₱${buySpinCost})`}
+        >
+          <span className="pointer-events-none absolute inset-1 rounded-full border border-amber-200/45" />
+          <span className="font-display text-[10px] sm:text-[11px] font-black leading-none text-amber-200 drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
+            BUY
+          </span>
+          <span className="font-display text-[8px] sm:text-[9px] font-black leading-none text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
+            BONUS
+          </span>
+        </button>
       </div>
 
-      {/* FULL-SCREEN 6×5 SLOT CABINET */}
-      <div
-        className={`relative flex-1 min-h-0 w-full rounded-2xl sm:rounded-3xl border-2 p-2 sm:p-3.5 shadow-2xl transition-colors flex flex-col lg:flex-row landscape:flex-row gap-2.5 overflow-y-auto lg:overflow-hidden landscape:overflow-hidden ${
-          isFreeSpinMode
-            ? `border-amber-300 shadow-[0_0_32px_rgba(251,191,36,0.28)] bg-gradient-to-b ${theme.freeSpinGradient}`
-            : `${theme.accentBorder} bg-gradient-to-b ${theme.cabinetGradient}`
-        }`}
-      >
-        {/* LEFT / MAIN STAGE: MULTIPLIERS + 6×5 REELS + TABLE PLAY STRIP */}
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-1.5 sm:gap-2">
-          {/* Multiplier Trail Header */}
-          <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-amber-400/20">
-            <div className="flex items-center gap-1 sm:gap-1.5">
-              {activeMultipliers.map((m, idx) => {
-                const isActive = isSpinning && lastWin > 0 && activeMultiplierIdx === idx;
-                const isPassed = isSpinning && lastWin > 0 && activeMultiplierIdx > idx;
-                return (
-                  <div
-                    key={m}
-                    className={`rounded-lg px-2 sm:px-3 py-1 font-mono-num text-[11px] sm:text-xs font-extrabold transition-all ${
-                      isActive
-                        ? 'bg-amber-400 text-emerald-950 scale-110 shadow-[0_0_20px_rgba(251,191,36,0.65)]'
-                        : isPassed
-                          ? 'bg-amber-500/30 text-amber-200 border border-amber-400/50'
-                          : isFreeSpinMode
-                            ? 'bg-amber-950/70 text-amber-200 border border-amber-400/50'
-                            : 'bg-[#031c16] text-emerald-300 border border-emerald-800'
-                    }`}
-                  >
-                    ×{m}
-                  </div>
-                );
-              })}
-            </div>
+      {/* ==================== MAIN SUPER ACE WOOD-AND-FELT CABINET ==================== */}
+      <div className="relative z-10 flex-1 min-h-0 w-full max-w-[560px] mx-auto flex flex-col px-1.5 sm:px-2 pb-1">
+        {/* CARVED MAHOGANY WOOD TOP ARCH + METALLIC TITLE + GOLDEN MULTIPLIER PILL */}
+        <div
+          className="relative shrink-0 rounded-t-2xl border-t-2 border-x-2 border-[#7c3d1e] px-2 pt-1.5 pb-1 shadow-2xl"
+          style={{
+            background:
+              'linear-gradient(180deg, #5d2914 0%, #3d1709 42%, #240c04 100%)',
+          }}
+        >
+          {/* Polished Wood Top Highlight Line */}
+          <div className="pointer-events-none absolute inset-x-3 top-0.5 h-[2px] rounded-full bg-amber-300/35" />
 
-            <div className="flex items-center gap-2 text-right">
-              {isFreeSpinMode ? (
-                <span className="inline-flex items-center gap-1 rounded-lg border border-amber-300/80 bg-amber-400/20 px-2.5 py-0.5 font-mono-num text-[11px] font-extrabold text-amber-200">
-                  <Sparkles className="h-3 w-3 text-amber-300" />
-                  FREE SPINS: {slotState.freeSpinsRemaining}/{slotState.freeSpinsTotal} · BONUS ₱
-                  {slotState.freeSpinTotalWin.toFixed(2)}
-                </span>
-              ) : (
-                <span className="text-[11px] font-semibold text-emerald-300">
-                  {theme.inspiredFeature}
-                </span>
-              )}
-            </div>
+          {/* Metallic Beveled Logo */}
+          <div className="flex items-center justify-center gap-2 leading-none mb-1">
+            <h1
+              className="font-display text-xl sm:text-2xl font-black tracking-tight bg-gradient-to-b from-[#fffce0] via-[#f7c85c] to-[#b56d14] bg-clip-text text-transparent drop-shadow-[0_2px_0_rgba(25,8,0,0.95)]"
+            >
+              {gameKey === 'superace' ? 'SuperAce' : theme.title}
+            </h1>
+            {isFreeSpinMode && (
+              <span className="rounded bg-amber-400 px-1.5 py-0.5 font-mono-num text-[9px] font-black text-amber-950">
+                BONUS ₱{slotState.freeSpinTotalWin.toFixed(2)}
+              </span>
+            )}
           </div>
 
-          {/* 6×5 CASCADING REEL GRID — Drops Down Slowly Per Row (Row 1 -> Row 2 -> Row 3 -> Row 4 -> Row 5) */}
-          <div className="relative flex-1 min-h-[250px] overflow-hidden rounded-2xl border border-amber-500/35 bg-[#02120d]/95 p-1.5 sm:p-2.5 shadow-inner flex flex-col">
-            <div className="grid flex-1 grid-cols-6 grid-rows-5 gap-1 sm:gap-1.5 h-full">
-              {grid.map((row, rIdx) =>
-                row.map((cell, cIdx) => {
-                  const key = `${rIdx},${cIdx}`;
-                  const isBreaking = breakingKeys.has(key);
-                  const isScatterHit = scatterKeys.has(key);
-                  const isTransforming = transformKeys.has(key);
-                  const visual = theme.symbols[cell.symbol];
-                  const isClearing = reelPhase === 'clearing';
-                  const isDropping = reelPhase === 'dropping';
-                  const isCascadeNew = reelPhase === 'cascading' && Boolean(cell.isNew);
-                  const rowFromBottom = ROWS - 1 - rIdx;
-
-                  // Clearing sweeps down row-by-row from bottom row out first
-                  const clearDelay =
-                    rowFromBottom * activeSpeed.clearRowStepSec + cIdx * activeSpeed.clearColStepSec;
-                  // New cards drop down PER ROW sequentially: Row 1 (rIdx=0) -> Row 2 -> Row 3 -> Row 4 -> Row 5
-                  const dropDelay =
-                    rIdx * activeSpeed.dropRowStepSec + cIdx * activeSpeed.dropColStepSec;
-                  const cascadeDelay =
-                    rIdx * activeSpeed.cascadeRowStepSec + cIdx * activeSpeed.cascadeColStepSec;
-
-                  let cardSurface =
-                    'bg-gradient-to-b from-[#fffef9] via-[#ffffff] to-[#f2ecdf] border border-stone-300/95 shadow-sm';
-                  if (cell.isScatter) {
-                    cardSurface =
-                      'bg-gradient-to-br from-amber-300 via-yellow-400 to-orange-500 border-2 border-yellow-100 shadow-[0_0_16px_rgba(251,191,36,0.55)]';
-                  } else if (cell.symbol === 'WILD_BIG') {
-                    cardSurface =
-                      'bg-gradient-to-br from-red-500 via-amber-400 to-yellow-300 border-2 border-amber-100 shadow-[0_0_20px_rgba(239,68,68,0.75)]';
-                  } else if (cell.symbol === 'WILD_SMALL') {
-                    cardSurface =
-                      'bg-gradient-to-br from-emerald-300 via-amber-200 to-yellow-400 border-2 border-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.5)]';
-                  } else if (cell.isGolden) {
-                    cardSurface =
-                      'bg-gradient-to-b from-amber-100 via-yellow-200 to-amber-300 border-2 border-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.45)]';
+          {/* Glowing Golden Pill Multiplier Bar (×1 ×2 ×3 ×4 ×5 or ×2 ×4 ×6 ×8 ×10) */}
+          <div className="mx-auto max-w-[360px] rounded-full border-2 border-[#ffe28a] bg-gradient-to-b from-[#f8c746] via-[#d7931d] to-[#9b5d09] px-3 py-0.5 shadow-[0_0_16px_rgba(245,184,46,0.45)] flex items-center justify-around">
+            {activeMultipliers.map((m, idx) => {
+              const isActive =
+                (isSpinning && lastWin > 0 && activeMultiplierIdx === idx) ||
+                (!isSpinning && idx === 0);
+              const isPassed = isSpinning && lastWin > 0 && activeMultiplierIdx > idx;
+              return (
+                <span
+                  key={m}
+                  className={`font-display text-sm sm:text-base font-black tabular-nums transition-all px-1.5 rounded-full ${
+                    isActive
+                      ? 'text-[#fff7a8] scale-115 drop-shadow-[0_0_8px_rgba(220,38,38,0.95)]'
+                      : isPassed
+                        ? 'text-amber-100'
+                        : 'text-[#311704]/90'
+                  }`}
+                  style={
+                    isActive
+                      ? {
+                          WebkitTextStroke: '1px #b91c1c',
+                          textShadow: '0 0 10px rgba(239,68,68,0.95), 0 0 4px #facc15',
+                        }
+                      : undefined
                   }
+                >
+                  ×{m}
+                </span>
+              );
+            })}
+          </div>
+        </div>
 
-                  return (
-                    <motion.div
-                      key={`${spinSeq}-${cell.id}`}
-                      layout={reelPhase === 'cascading'}
-                      initial={
-                        isDropping
-                          ? { opacity: 0.1, y: -260, scale: 0.94 }
-                          : isCascadeNew
-                            ? { opacity: 0, y: -120, scale: 0.9 }
-                            : false
-                      }
-                      animate={
-                        isClearing
-                          ? { opacity: 0, y: 260, scale: 0.94 }
-                          : {
-                              opacity: isBreaking ? 0.25 : 1,
-                              y: 0,
-                              scale: isBreaking
-                                ? 1.12
-                                : isScatterHit || isTransforming
-                                  ? [1, 1.14, 1]
-                                  : 1,
-                              rotate: isTransforming ? [0, -8, 8, 0] : 0,
-                            }
-                      }
-                      transition={
-                        isClearing
+        {/* 3D STACKED CARD DECK SHOES ABOVE ALL 6 REEL COLUMNS (matching Screenshot 2 & 3!) */}
+        <div className="shrink-0 grid grid-cols-6 gap-1 sm:gap-1.5 bg-[#1b0b05] border-x-2 border-[#7c3d1e] px-1.5 sm:px-2 pt-1 pb-0.5">
+          {Array.from({ length: COLS }).map((_, colIdx) => (
+            <div
+              key={colIdx}
+              className="relative h-4 sm:h-5 rounded-t-md border border-slate-400/70 bg-gradient-to-b from-[#d9dce3] via-[#b7bdc8] to-[#7d8492] overflow-hidden shadow-inner flex flex-col justify-end"
+            >
+              {/* Red-trimmed card back peeking on top */}
+              <div className="mx-1 mb-[2px] h-1.5 rounded-xs bg-gradient-to-r from-rose-900/70 via-rose-700/60 to-rose-900/70 border border-white/40" />
+              {/* Stacked card edge striations */}
+              <div className="h-[5px] w-full bg-[repeating-linear-gradient(180deg,#f8fafc_0px,#f8fafc_1px,#64748b_1px,#64748b_2px)]" />
+            </div>
+          ))}
+        </div>
+
+        {/* DARK TEAL CASINO FELT 6×5 REEL WINDOW */}
+        <div
+          className={`relative flex-1 min-h-[240px] overflow-hidden border-x-2 border-b-[3px] px-1.5 sm:px-2 py-1.5 shadow-[inset_0_0_28px_rgba(0,0,0,0.65)] flex flex-col ${
+            isFreeSpinMode
+              ? 'border-amber-300'
+              : 'border-[#c8a252]'
+          }`}
+          style={{
+            background: isFreeSpinMode
+              ? 'radial-gradient(circle at 50% 45%, #1d645b 0%, #0d3e3a 58%, #072225 100%)'
+              : 'radial-gradient(circle at 50% 45%, #196b70 0%, #0e4a50 60%, #072c31 100%)',
+          }}
+        >
+          {/* Radiant Vertical Anticipation Spin Light Streaks (matching Screenshot_20261121-025018!) */}
+          {(reelPhase === 'clearing' || reelPhase === 'dropping') && (
+            <div className="pointer-events-none absolute inset-0 grid grid-cols-6 gap-1.5 px-2 z-0">
+              {Array.from({ length: COLS }).map((_, colIdx) => (
+                <div
+                  key={colIdx}
+                  className={`h-full rounded-md transition-opacity duration-200 ${
+                    colIdx % 2 === 0
+                      ? 'bg-gradient-to-b from-amber-300/15 via-yellow-400/35 to-amber-400/65'
+                      : 'bg-gradient-to-b from-emerald-300/20 via-emerald-400/40 to-amber-300/40'
+                  } animate-pulse`}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* 6×5 CASCADING REELS GRID */}
+          <div className="relative z-10 grid flex-1 grid-cols-6 grid-rows-5 gap-1 sm:gap-1.5 h-full">
+            {grid.map((row, rIdx) =>
+              row.map((cell, cIdx) => {
+                const key = `${rIdx},${cIdx}`;
+                const isBreaking = breakingKeys.has(key);
+                const isScatterHit = scatterKeys.has(key);
+                const isTransforming = transformKeys.has(key);
+                const visual = theme.symbols[cell.symbol];
+                const isClearing = reelPhase === 'clearing';
+                const isDropping = reelPhase === 'dropping';
+                const isCascadeNew = reelPhase === 'cascading' && Boolean(cell.isNew);
+                const rowFromBottom = ROWS - 1 - rIdx;
+
+                const clearDelay =
+                  rowFromBottom * activeSpeed.clearRowStepSec + cIdx * activeSpeed.clearColStepSec;
+                const dropDelay =
+                  rIdx * activeSpeed.dropRowStepSec + cIdx * activeSpeed.dropColStepSec;
+                const cascadeDelay =
+                  rIdx * activeSpeed.cascadeRowStepSec + cIdx * activeSpeed.cascadeColStepSec;
+
+                let cardSurface =
+                  'bg-gradient-to-b from-[#f8fafd] via-[#ffffff] to-[#dfe5ef] border border-slate-400/90 shadow-[0_2px_4px_rgba(0,0,0,0.4)]';
+                if (cell.isScatter) {
+                  cardSurface =
+                    'bg-gradient-to-b from-amber-200 via-yellow-400 to-orange-500 border-2 border-yellow-100 shadow-[0_0_16px_rgba(251,191,36,0.75)]';
+                } else if (cell.symbol === 'WILD_BIG') {
+                  cardSurface =
+                    'bg-gradient-to-b from-yellow-200 via-amber-400 to-red-500 border-2 border-yellow-100 shadow-[0_0_20px_rgba(239,68,68,0.85)]';
+                } else if (cell.symbol === 'WILD_SMALL') {
+                  cardSurface =
+                    'bg-gradient-to-b from-yellow-100 via-amber-300 to-amber-500 border-2 border-yellow-100 shadow-[0_0_16px_rgba(250,204,21,0.75)]';
+                } else if (cell.isGolden) {
+                  cardSurface =
+                    'bg-gradient-to-b from-[#fff5b8] via-[#fbd04b] to-[#d48e15] border-2 border-[#fff3a6] shadow-[0_0_14px_rgba(250,204,21,0.65)]';
+                }
+
+                return (
+                  <motion.div
+                    key={`${spinSeq}-${cell.id}`}
+                    layout={reelPhase === 'cascading'}
+                    initial={
+                      isDropping
+                        ? { opacity: 0.15, y: -240, scale: 0.94 }
+                        : isCascadeNew
+                          ? { opacity: 0, y: -110, scale: 0.9 }
+                          : false
+                    }
+                    animate={
+                      isClearing
+                        ? { opacity: 0, y: 240, scale: 0.94 }
+                        : {
+                            opacity: isBreaking ? 0.25 : 1,
+                            y: 0,
+                            scale: isBreaking
+                              ? 1.1
+                              : isScatterHit || isTransforming
+                                ? [1, 1.14, 1]
+                                : 1,
+                            rotate: isTransforming ? [0, -8, 8, 0] : 0,
+                          }
+                    }
+                    transition={
+                      isClearing
+                        ? {
+                            duration: activeSpeed.clearDurationSec,
+                            delay: clearDelay,
+                            ease: 'easeIn',
+                          }
+                        : isDropping
                           ? {
-                              duration: activeSpeed.clearDurationSec,
-                              delay: clearDelay,
-                              ease: 'easeIn',
+                              type: 'spring',
+                              stiffness: activeSpeed.dropStiffness,
+                              damping: activeSpeed.dropDamping,
+                              mass: activeSpeed.dropMass,
+                              delay: dropDelay,
                             }
-                          : isDropping
+                          : isCascadeNew
                             ? {
                                 type: 'spring',
                                 stiffness: activeSpeed.dropStiffness,
                                 damping: activeSpeed.dropDamping,
-                                mass: activeSpeed.dropMass,
-                                delay: dropDelay,
+                                delay: cascadeDelay,
                               }
-                            : isCascadeNew
-                              ? {
-                                  type: 'spring',
-                                  stiffness: activeSpeed.dropStiffness,
-                                  damping: activeSpeed.dropDamping,
-                                  delay: cascadeDelay,
-                                }
-                              : {
-                                  duration: spinSpeed === 'fast' ? 0.16 : 0.26,
-                                }
-                      }
-                      className={`relative w-full h-full min-h-[46px] rounded-lg sm:rounded-xl flex flex-col items-center justify-between p-1 select-none overflow-hidden ${cardSurface} ${
-                        isBreaking ? 'ring-2 ring-amber-300 shadow-[0_0_24px_rgba(251,191,36,0.95)]' : ''
-                      } ${isScatterHit ? 'ring-2 ring-white' : ''}`}
-                    >
-                      {gameKey === 'superace' ? (() => {
-                        const cardSpec: Record<
-                          SuperAceSymbol,
-                          {
-                            cornerRank: string;
-                            suit: Suit;
-                            colorClass: string;
-                            court?: 'J' | 'Q' | 'K' | 'JOKER';
-                            frameBg?: string;
-                            frameBorder?: string;
-                            badge?: string;
-                          }
-                        > = {
-                          ACE: {
-                            cornerRank: 'A',
-                            suit: '♠',
-                            colorClass: 'text-indigo-950',
-                            frameBg: 'from-indigo-100/90 via-white to-slate-100/90',
-                            frameBorder: 'border-indigo-400/75',
-                          },
-                          KING: {
-                            cornerRank: 'K',
-                            suit: '♥',
-                            colorClass: 'text-red-600',
-                            court: 'K',
-                            frameBg: 'from-rose-100/90 via-white to-red-50/90',
-                            frameBorder: 'border-rose-400/80',
-                          },
-                          QUEEN: {
-                            cornerRank: 'Q',
-                            suit: '♦',
-                            colorClass: 'text-blue-600',
-                            court: 'Q',
-                            frameBg: 'from-sky-100/90 via-white to-blue-50/90',
-                            frameBorder: 'border-sky-400/80',
-                          },
-                          JACK: {
-                            cornerRank: 'J',
-                            suit: '♣',
-                            colorClass: 'text-emerald-700',
-                            court: 'J',
-                            frameBg: 'from-emerald-100/90 via-white to-teal-50/90',
-                            frameBorder: 'border-emerald-400/80',
-                          },
-                          SPADE: { cornerRank: '♠', suit: '♠', colorClass: 'text-indigo-950' },
-                          HEART: { cornerRank: '♥', suit: '♥', colorClass: 'text-red-600' },
-                          DIAMOND: { cornerRank: '♦', suit: '♦', colorClass: 'text-blue-600' },
-                          CLUB: { cornerRank: '♣', suit: '♣', colorClass: 'text-emerald-700' },
-                          WILD_SMALL: {
-                            cornerRank: 'W',
-                            suit: '★',
-                            colorClass: 'text-purple-800',
-                            court: 'JOKER',
-                            frameBg: 'from-amber-100 via-white to-emerald-100',
-                            frameBorder: 'border-amber-500',
-                            badge: 'WILD',
-                          },
-                          WILD_BIG: {
-                            cornerRank: '×2',
-                            suit: '★',
-                            colorClass: 'text-red-900',
-                            court: 'JOKER',
-                            frameBg: 'from-amber-200 via-yellow-50 to-red-100',
-                            frameBorder: 'border-red-500',
-                            badge: 'MULTI ×2',
-                          },
-                          SCATTER: {
-                            cornerRank: '★',
-                            suit: '★',
-                            colorClass: 'text-amber-950',
-                            badge: 'SCATTER',
-                          },
-                        };
+                            : {
+                                duration: spinSpeed === 'fast' ? 0.16 : 0.26,
+                              }
+                    }
+                    className={`relative w-full h-full min-h-[44px] rounded-[6px] sm:rounded-[8px] flex flex-col items-center justify-center overflow-hidden ${cardSurface} ${
+                      isBreaking ? 'ring-2 ring-amber-200 shadow-[0_0_24px_rgba(251,191,36,0.95)]' : ''
+                    } ${isScatterHit ? 'ring-2 ring-white' : ''}`}
+                  >
+                    {/* Golden Card Gleam Inner Frame */}
+                    {cell.isGolden && !cell.isWild && !cell.isScatter && (
+                      <div
+                        className="pointer-events-none absolute inset-[2px] rounded-[5px] border border-amber-700/50"
+                        aria-hidden="true"
+                      />
+                    )}
 
-                        const spec = cardSpec[cell.symbol];
-                        const isRankFace =
-                          cell.symbol === 'ACE' ||
-                          cell.symbol === 'KING' ||
-                          cell.symbol === 'QUEEN' ||
-                          cell.symbol === 'JACK' ||
-                          cell.isWild;
-
-                        return (
-                          <>
-                            <div
-                              className={`pointer-events-none absolute inset-[2px] rounded-[7px] sm:rounded-[9px] border ${
-                                cell.isGolden
-                                  ? 'border-amber-600/60'
-                                  : cell.isScatter
-                                    ? 'border-yellow-100/80'
-                                    : 'border-stone-300/75'
-                              }`}
-                              aria-hidden="true"
-                            />
-
-                            <div
-                              className={`absolute top-[2px] left-[3px] z-10 flex flex-col items-center leading-none ${spec.colorClass}`}
-                            >
-                              {isRankFace ? (
-                                <>
-                                  <span className="font-display text-[9px] sm:text-[11px] font-black tracking-tighter leading-[0.95]">
-                                    {spec.cornerRank}
-                                  </span>
-                                  <BoldSuitIcon
-                                    suit={spec.suit}
-                                    className="w-[8px] h-[8px] sm:w-[10px] sm:h-[10px] mt-[1px]"
-                                  />
-                                </>
-                              ) : (
-                                <BoldSuitIcon
-                                  suit={spec.suit}
-                                  className="w-[9px] h-[9px] sm:w-[11px] sm:h-[11px]"
-                                />
-                              )}
-                            </div>
-
-                            <div
-                              className={`absolute bottom-[2px] right-[3px] z-10 flex flex-col items-center leading-none rotate-180 ${spec.colorClass}`}
-                            >
-                              {isRankFace ? (
-                                <>
-                                  <span className="font-display text-[9px] sm:text-[11px] font-black tracking-tighter leading-[0.95]">
-                                    {spec.cornerRank}
-                                  </span>
-                                  <BoldSuitIcon
-                                    suit={spec.suit}
-                                    className="w-[8px] h-[8px] sm:w-[10px] sm:h-[10px] mt-[1px]"
-                                  />
-                                </>
-                              ) : (
-                                <BoldSuitIcon
-                                  suit={spec.suit}
-                                  className="w-[9px] h-[9px] sm:w-[11px] sm:h-[11px]"
-                                />
-                              )}
-                            </div>
-
-                            {cell.isGolden && !cell.isWild && !cell.isScatter && (
-                              <span className="absolute top-[3px] right-[3px] z-10 rounded bg-amber-600 px-1 py-[1px] text-[6px] sm:text-[7px] font-black uppercase text-amber-50 leading-none shadow">
-                                GOLD
-                              </span>
-                            )}
-
-                            <div className="relative flex-1 w-full h-full flex items-center justify-center px-[9px] py-[4px] sm:px-[12px] sm:py-[6px]">
-                              {cell.isScatter ? (
-                                <div className="flex flex-col items-center justify-center gap-0.5">
-                                  <BoldSuitIcon suit="★" className="w-7 h-7 sm:w-10 sm:h-10" />
-                                  <span className="rounded bg-amber-950/90 px-1.5 py-[1px] text-[7px] sm:text-[8px] font-black uppercase tracking-wider text-amber-200 border border-amber-300/60">
-                                    SCATTER
-                                  </span>
-                                </div>
-                              ) : spec.court ? (
-                                <div
-                                  className={`w-full h-full rounded-[5px] border ${spec.frameBorder} ring-1 ring-inset ring-amber-400/50 bg-gradient-to-b ${spec.frameBg} flex items-center justify-center overflow-hidden shadow-inner relative`}
-                                >
-                                  <BoldSuitIcon
-                                    suit={spec.suit}
-                                    className="absolute top-[1.5px] right-[1.5px] w-[7px] h-[7px] sm:w-[9px] sm:h-[9px] opacity-85"
-                                  />
-                                  <BoldSuitIcon
-                                    suit={spec.suit}
-                                    className="absolute bottom-[1.5px] left-[1.5px] w-[7px] h-[7px] sm:w-[9px] sm:h-[9px] rotate-180 opacity-85"
-                                  />
-                                  <CourtPortrait
-                                    rank={spec.court}
-                                    suit={spec.suit}
-                                    className="w-[92%] h-[92%]"
-                                  />
-                                  {spec.badge && (
-                                    <span
-                                      className={`absolute bottom-[1px] inset-x-[2px] text-center rounded px-1 py-[1px] text-[6px] sm:text-[7px] font-black uppercase leading-none ${
-                                        cell.symbol === 'WILD_BIG'
-                                          ? 'bg-red-700 text-yellow-100'
-                                          : 'bg-black/80 text-amber-300'
-                                      }`}
-                                    >
-                                      {spec.badge}
-                                    </span>
-                                  )}
-                                </div>
-                              ) : cell.symbol === 'ACE' ? (
-                                <div className="rounded-full border border-amber-400/80 bg-gradient-to-b from-indigo-100/90 via-white to-slate-100/90 p-1 sm:p-1.5 shadow-inner flex items-center justify-center">
-                                  <BoldSuitIcon
-                                    suit="♠"
-                                    className="w-6 h-6 sm:w-9 sm:h-9"
-                                  />
-                                </div>
-                              ) : (
-                                <BoldSuitIcon
-                                  suit={spec.suit}
-                                  className="w-6 h-6 sm:w-9 sm:h-9"
-                                />
-                              )}
-                            </div>
-                          </>
-                        );
-                      })() : (
-                        <>
-                          <div className="w-full flex items-center justify-between leading-none">
-                            <span
-                              className={`font-display text-[10px] sm:text-xs font-black tracking-tight ${visual.textColor}`}
-                            >
-                              {cell.isScatter
-                                ? '★'
-                                : cell.symbol === 'WILD_BIG'
-                                  ? '×2'
-                                  : cell.isWild
-                                    ? 'W'
-                                    : visual.label.slice(0, 2)}
-                            </span>
-                            {cell.isGolden && !cell.isWild && !cell.isScatter && (
-                              <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-amber-500 ring-1 ring-amber-200" />
-                            )}
-                          </div>
-
-                          <div className="flex-1 w-full flex items-center justify-center min-h-0">
-                            {visual.icon === '♠' || visual.icon === '♥' || visual.icon === '♦' || visual.icon === '♣' ? (
-                              <BoldSuitIcon
-                                suit={visual.icon as Suit}
-                                className="max-h-full h-6 w-6 sm:h-9 sm:w-9"
-                              />
-                            ) : (
-                              <span
-                                className={`text-xl sm:text-3xl leading-none drop-shadow-xs ${visual.textColor}`}
-                              >
-                                {visual.icon}
-                              </span>
-                            )}
-                          </div>
-
-                          <span
-                            className={`text-[7px] sm:text-[9px] font-black uppercase tracking-tight leading-none truncate max-w-full ${visual.textColor}`}
-                          >
-                            {cell.symbol === 'WILD_BIG'
-                              ? 'MULTI WILD ×2'
-                              : cell.symbol === 'WILD_SMALL'
-                                ? 'WILD'
-                                : visual.subLabel || (cell.isGolden ? 'GOLD' : visual.label)}
+                    {gameKey === 'superace' ? (
+                      renderSuperAceCardFace(cell)
+                    ) : (
+                      <>
+                        <div className="w-full flex items-center justify-between px-1 pt-0.5 leading-none">
+                          <span className={`font-display text-[9px] sm:text-xs font-black ${visual.textColor}`}>
+                            {cell.isScatter ? '★' : cell.symbol === 'WILD_BIG' ? '×2' : cell.isWild ? 'W' : visual.label.slice(0, 2)}
                           </span>
-                        </>
-                      )}
+                          {cell.isGolden && !cell.isWild && !cell.isScatter && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 w-full flex items-center justify-center min-h-0">
+                          {visual.icon === '♠' || visual.icon === '♥' || visual.icon === '♦' || visual.icon === '♣' ? (
+                            <BoldSuitIcon suit={visual.icon as Suit} className="h-6 w-6 sm:h-8 sm:w-8" />
+                          ) : (
+                            <span className={`text-xl sm:text-2xl leading-none ${visual.textColor}`}>
+                              {visual.icon}
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-[7px] sm:text-[8px] font-black uppercase pb-0.5 truncate max-w-full ${visual.textColor}`}>
+                          {cell.symbol === 'WILD_BIG'
+                            ? 'MULTI ×2'
+                            : cell.symbol === 'WILD_SMALL'
+                              ? 'WILD'
+                              : visual.subLabel || visual.label}
+                        </span>
+                      </>
+                    )}
 
-                      {isBreaking && (
-                        <div className="absolute inset-0 bg-amber-300/45 animate-pulse pointer-events-none" />
-                      )}
-                    </motion.div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Cascade Win Floating Banner */}
-            <AnimatePresence>
-              {cascadeBanner && (
-                <motion.div
-                  initial={{ opacity: 0, y: 12, scale: 0.92 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 rounded-xl border border-amber-300/80 bg-[#031c16]/95 px-4 py-1.5 font-mono-num text-xs sm:text-sm font-extrabold text-amber-300 shadow-2xl whitespace-nowrap"
-                >
-                  {cascadeBanner}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* 5-Second Sparkling Big / Super / Excellent Win & Free Spins Total Celebration */}
-            <AnimatePresence>
-              {celebrationModal && (
-                <SlotWinCelebration
-                  payload={celebrationModal}
-                  onDismiss={dismissCelebration}
-                  turboMode={spinSpeed === 'fast'}
-                />
-              )}
-            </AnimatePresence>
+                    {isBreaking && (
+                      <div className="absolute inset-0 bg-amber-300/45 animate-pulse pointer-events-none" />
+                    )}
+                  </motion.div>
+                );
+              })
+            )}
           </div>
 
-          {/* TABLE PLAY BAR: BET AMOUNT | WIN : AMOUNT (PER SPIN) | ⚡ SLOW & ⚡⚡ FAST | COINS BET BUTTON */}
-          <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-800/80 bg-[#031c16]/95 px-2.5 sm:px-3.5 py-2">
-            <div className="flex items-center gap-3 sm:gap-5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] sm:text-xs font-bold uppercase text-emerald-400">
-                  Bet:
-                </span>
-                <span className="font-mono-num text-sm sm:text-base font-extrabold text-white">
-                  ₱{displayBet.toFixed(displayBet < 1 ? 2 : 0)}
-                </span>
-              </div>
-              <div className="h-4 w-px bg-emerald-800" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] sm:text-xs font-bold uppercase text-emerald-400">
-                  Win :
-                </span>
-                <span
-                  className={`font-mono-num text-sm sm:text-base font-extrabold transition-colors ${
-                    lastWin > 0
-                      ? 'text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.65)]'
-                      : 'text-emerald-200'
-                  }`}
-                >
-                  ₱{lastWin.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            </div>
-
-            {/* Table Speed (⚡ Slow / ⚡⚡ Fast) & Coins Bet Trigger */}
-            <div className="flex items-center gap-1.5">
-              {/* Single Flash Sign (⚡) = Slow Spin */}
-              <button
-                type="button"
-                onClick={() => {
-                  playChipClink();
-                  setSpinSpeed('slow');
-                }}
-                title="Slow Spin (Row-by-Row Card Drop)"
-                className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-extrabold transition-all cursor-pointer ${
-                  spinSpeed === 'slow'
-                    ? 'border-amber-300 bg-amber-400 text-emerald-950 shadow-[0_0_12px_rgba(251,191,36,0.45)]'
-                    : 'border-emerald-700 bg-[#02140f] text-emerald-200 hover:border-amber-400'
-                }`}
+          {/* Cascade Win Floating Banner */}
+          <AnimatePresence>
+            {cascadeBanner && (
+              <motion.div
+                initial={{ opacity: 0, y: 12, scale: 0.92 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 z-20 rounded-xl border-2 border-amber-300 bg-[#2b1005]/95 px-4 py-1 font-mono-num text-xs sm:text-sm font-black text-amber-200 shadow-2xl whitespace-nowrap"
               >
-                <Zap className="h-3.5 w-3.5 fill-current" />
-                <span>Slow</span>
-              </button>
+                {cascadeBanner}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-              {/* Double Flash Sign (⚡⚡) = Fast Spin */}
-              <button
-                type="button"
-                onClick={() => {
-                  playChipClink();
-                  setSpinSpeed('fast');
-                }}
-                title="Fast Spin"
-                className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-extrabold transition-all cursor-pointer ${
-                  spinSpeed === 'fast'
-                    ? 'border-amber-300 bg-amber-400 text-emerald-950 shadow-[0_0_12px_rgba(251,191,36,0.45)]'
-                    : 'border-emerald-700 bg-[#02140f] text-emerald-200 hover:border-amber-400'
-                }`}
-              >
-                <span className="inline-flex items-center -space-x-1.5">
-                  <Zap className="h-3.5 w-3.5 fill-current" />
-                  <Zap className="h-3.5 w-3.5 fill-current" />
-                </span>
-                <span>Fast</span>
-              </button>
-
-              {/* Coins Sign (Betting Button + Interactive Popover) */}
-              <div className="relative">
-                <button
-                  type="button"
-                  disabled={isSpinning || isFreeSpinMode}
-                  onClick={() => {
-                    playChipClink();
-                    setBetDrawerOpen((v) => !v);
-                  }}
-                  title="Select Bet Amount"
-                  className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-extrabold transition-all cursor-pointer disabled:opacity-45 ${
-                    betDrawerOpen
-                      ? 'border-amber-300 bg-amber-400 text-emerald-950'
-                      : 'border-amber-400/70 bg-[#052920] text-amber-300 hover:bg-amber-400 hover:text-emerald-950'
-                  }`}
-                >
-                  <Coins className="h-3.5 w-3.5" />
-                  <span>₱{displayBet}</span>
-                </button>
-
-                {betDrawerOpen && (
-                  <div className="absolute bottom-10 right-0 z-40 w-56 rounded-2xl border border-amber-400/70 bg-[#052920] p-2.5 shadow-2xl space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-amber-300">
-                      <span className="inline-flex items-center gap-1">
-                        <Coins className="h-3.5 w-3.5" />
-                        Select Bet Amount
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setBetDrawerOpen(false)}
-                        className="text-emerald-300 hover:text-white cursor-pointer"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1">
-                      {SUPER_ACE_BETS.map((amount, idx) => {
-                        const active = idx === betIndex;
-                        return (
-                          <button
-                            key={amount}
-                            type="button"
-                            onClick={() => {
-                              handleSelectBet(idx);
-                              setBetDrawerOpen(false);
-                            }}
-                            className={`rounded-lg py-1.5 font-mono-num text-[11px] font-extrabold transition cursor-pointer ${
-                              active
-                                ? 'bg-amber-400 text-emerald-950 ring-2 ring-amber-200'
-                                : 'border border-emerald-800 bg-[#031c16] text-emerald-100 hover:border-amber-400'
-                            }`}
-                          >
-                            {amount < 1 ? '.5' : amount}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT / BOTTOM CONTROL DECK: BUY SPIN · COINS BETTING · PLAY/SPIN · AUTO SPIN */}
-        <div className="shrink-0 w-full lg:w-[300px] landscape:w-[255px] sm:landscape:w-[290px] flex flex-col justify-between gap-2 rounded-2xl border border-emerald-800/70 bg-[#031c16]/90 p-2.5 sm:p-3 overflow-y-auto">
-          {/* BUY FREE SPIN SCATTER BUTTON (Bet 1 -> Buy 100) */}
-          <button
-            type="button"
-            disabled={isSpinning || isFreeSpinMode}
-            onClick={() => {
-              playChipClink();
-              setBuyModalOpen(true);
-            }}
-            className="w-full rounded-2xl border-2 border-amber-300/80 bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-400 px-3 py-2.5 text-emerald-950 shadow-lg hover:brightness-105 disabled:opacity-45 transition cursor-pointer flex items-center justify-between gap-2"
-          >
-            <div className="flex items-center gap-2 text-left">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-950/90 text-amber-300 shrink-0">
-                <ShoppingBag className="h-4 w-4" />
-              </div>
-              <div>
-                <span className="block font-display text-xs font-black uppercase leading-tight">
-                  Buy Free Spin
-                </span>
-                <span className="block text-[10px] font-bold text-emerald-950/80 leading-tight">
-                  10 Scatter Free Spins (100× Bet)
-                </span>
-              </div>
-            </div>
-            <span className="rounded-xl bg-emerald-950 px-2.5 py-1 font-mono-num text-xs font-black text-amber-300 whitespace-nowrap">
-              ₱{buySpinCost.toLocaleString('en-PH')}
-            </span>
-          </button>
-
+          {/* Error Toast inside Reel Window */}
           {errorMsg && (
-            <div className="rounded-xl border border-red-500/50 bg-red-950/60 px-3 py-1.5 text-[11px] text-red-200">
+            <div className="absolute top-2 inset-x-3 z-20 rounded-xl border border-red-400/70 bg-red-950/90 px-3 py-1.5 text-center text-[11px] font-semibold text-red-100 shadow-xl">
               {errorMsg}
             </div>
           )}
 
-          {/* COINS BETTING PANEL (Always accessible on desktop & collapsible via Coins button) */}
-          <div className={`space-y-1.5 ${betDrawerOpen ? 'block' : 'block'}`}>
-            <div className="flex items-center justify-between gap-2 text-[11px]">
-              <span className="inline-flex items-center gap-1 font-semibold text-amber-300">
-                <Coins className="h-3.5 w-3.5" />
-                Bet Amount (₱0.5–₱50)
-              </span>
-              <span className="font-mono-num text-emerald-400">
-                Spins: {slotState.totalRegularSpins}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-6 landscape:grid-cols-4 lg:grid-cols-4 gap-1">
-              {SUPER_ACE_BETS.map((amount, idx) => {
-                const active = idx === betIndex;
-                return (
+          {/* FLOATING BRONZE/GOLD BET MATRIX POPUP (Matches Screenshot_20261121-025033!) */}
+          <AnimatePresence>
+            {betDrawerOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 14, scale: 0.96 }}
+                className="absolute inset-x-2 bottom-2 z-30 rounded-lg border-2 border-[#c8a252] bg-[#1a150e]/96 shadow-[0_14px_38px_rgba(0,0,0,0.85)] overflow-hidden"
+              >
+                <div className="flex items-center justify-between border-b border-[#5b4827] bg-[#261d11] px-3 py-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-200">
+                    <Coins className="h-3.5 w-3.5 text-amber-400" />
+                    Select Bet Amount (₱)
+                  </span>
                   <button
-                    key={amount}
                     type="button"
-                    disabled={isSpinning || isFreeSpinMode}
-                    onClick={() => handleSelectBet(idx)}
-                    className={`rounded-lg py-1.5 font-mono-num text-[11px] font-extrabold transition-all cursor-pointer disabled:opacity-45 ${
-                      active
-                        ? 'bg-amber-400 text-emerald-950 shadow-md ring-2 ring-amber-200'
-                        : 'border border-emerald-800 bg-[#052920] text-emerald-100 hover:border-amber-400/70'
-                    }`}
+                    onClick={() => setBetDrawerOpen(false)}
+                    className="rounded p-0.5 text-amber-200/80 hover:text-white cursor-pointer"
                   >
-                    {amount < 1 ? '.5' : amount}
+                    <X className="h-4 w-4" />
                   </button>
-                );
-              })}
-            </div>
-          </div>
+                </div>
+                <div className="grid grid-cols-4 divide-x divide-y divide-[#3a301e]">
+                  {[...SUPER_ACE_BETS].reverse().map((amount) => {
+                    const idx = SUPER_ACE_BETS.indexOf(amount);
+                    const active = idx === betIndex;
+                    return (
+                      <button
+                        key={amount}
+                        type="button"
+                        onClick={() => {
+                          handleSelectBet(idx);
+                          setBetDrawerOpen(false);
+                        }}
+                        className={`py-3 font-mono-num text-sm font-bold transition cursor-pointer ${
+                          active
+                            ? 'bg-gradient-to-b from-[#695b30] to-[#3f371d] text-amber-100 ring-2 ring-inset ring-amber-300/90 shadow-inner'
+                            : 'text-stone-100 hover:bg-[#2c2417]'
+                        }`}
+                      >
+                        {amount}
+                      </button>
+                    );
+                  })}
+                  <div className="flex items-center justify-center text-[10px] font-bold text-amber-400/70">
+                    CHOY
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* SPEED CONTROL (⚡ Slow & ⚡⚡ Fast) + Rewards Summary */}
-          <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-emerald-800/80 bg-[#02140f] p-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                playChipClink();
-                setSpinSpeed('slow');
-              }}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-extrabold transition cursor-pointer ${
-                spinSpeed === 'slow'
-                  ? 'bg-amber-400 text-emerald-950 shadow'
-                  : 'text-emerald-200 hover:bg-emerald-900/60'
-              }`}
-            >
-              <Zap className="h-3.5 w-3.5 fill-current" />
-              Slow
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playChipClink();
-                setSpinSpeed('fast');
-              }}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-extrabold transition cursor-pointer ${
-                spinSpeed === 'fast'
-                  ? 'bg-amber-400 text-emerald-950 shadow'
-                  : 'text-emerald-200 hover:bg-emerald-900/60'
-              }`}
-            >
-              <span className="inline-flex items-center -space-x-1.5">
-                <Zap className="h-3.5 w-3.5 fill-current" />
-                <Zap className="h-3.5 w-3.5 fill-current" />
+          {/* FLOATING AUTOPLAY POPOVER */}
+          <AnimatePresence>
+            {autoMenuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 14, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                className="absolute right-3 bottom-2 z-30 w-52 rounded-xl border-2 border-[#c8a252] bg-[#1a150e]/96 p-2.5 shadow-2xl space-y-2"
+              >
+                <div className="flex items-center justify-between border-b border-[#4c3d22] pb-1.5">
+                  <span className="text-xs font-bold text-amber-200">Autoplay Spins</span>
+                  <button
+                    type="button"
+                    onClick={() => setAutoMenuOpen(false)}
+                    className="text-amber-200/70 hover:text-white cursor-pointer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[10, 25, 50, 100].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => startAutoSpin(cnt)}
+                      className="inline-flex items-center justify-center gap-1 rounded-lg border border-[#5a4826] bg-[#2a2114] py-2 font-mono-num text-xs font-bold text-amber-100 hover:border-amber-300 hover:bg-[#3a2d1a] cursor-pointer"
+                    >
+                      <Play className="h-3 w-3" />
+                      {cnt}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => startAutoSpin(9999)}
+                  className="w-full rounded-lg border border-amber-400/60 bg-amber-500/20 py-1.5 text-xs font-bold text-amber-200 hover:bg-amber-400 hover:text-amber-950 cursor-pointer"
+                >
+                  Continuous (Until Stop)
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 5-Second Sparkling Big / Super / Excellent Win & Free Spins Total Celebration */}
+          <AnimatePresence>
+            {celebrationModal && (
+              <SlotWinCelebration
+                payload={celebrationModal}
+                onDismiss={dismissCelebration}
+                turboMode={spinSpeed === 'fast'}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* CURVED MAHOGANY BOTTOM CONTROL CONSOLE (Matches Screenshot_20261121-025033!) */}
+        <div
+          className="relative shrink-0 rounded-b-2xl border-x-2 border-b-2 border-[#7c3d1e] px-2 pt-2 pb-2 shadow-2xl"
+          style={{
+            background:
+              'radial-gradient(ellipse at 50% 0%, #5b2612 0%, #3a1508 55%, #1c0904 100%)',
+          }}
+        >
+          <div className="flex items-center justify-between gap-1 sm:gap-3 max-w-[440px] mx-auto">
+            {/* 1. Settings / Info Gear Button */}
+            <div className="flex flex-col items-center gap-0.5 w-14">
+              <button
+                type="button"
+                onClick={() => {
+                  playChipClink();
+                  setInfoModalOpen(true);
+                }}
+                title="Paytable & Game Info"
+                className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full border-2 border-[#8c6443] bg-gradient-to-b from-[#5d3326] to-[#2e1510] text-amber-200/90 shadow-lg hover:border-amber-300 hover:text-amber-200 active:scale-95 transition cursor-pointer"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
+              <span className="text-[9px] font-semibold text-amber-200/75 leading-none">
+                Rules
               </span>
-              Fast
-            </button>
-          </div>
+            </div>
 
-          {/* PRIMARY TABLE PLAY DECK: SPIN / FREE SPIN · −/+ BET · AUTO SPIN */}
-          <div className="space-y-1.5">
-            <button
-              type="button"
-              disabled={isSpinning}
-              onClick={executeSpin}
-              className={`w-full inline-flex items-center justify-center gap-2 rounded-2xl py-3 px-4 font-display text-base sm:text-lg font-black transition-all shadow-xl cursor-pointer disabled:opacity-65 ${
-                isFreeSpinMode
-                  ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-400 text-emerald-950 ring-2 ring-amber-200'
-                  : 'bg-gradient-to-r from-emerald-400 via-emerald-300 to-amber-300 text-emerald-950 hover:brightness-105'
-              }`}
-            >
-              <RotateCw className={`h-5 w-5 ${isSpinning ? 'animate-spin' : ''}`} />
-              {isSpinning
-                ? 'SPINNING...'
-                : isFreeSpinMode
-                  ? `FREE SPIN (${slotState.freeSpinsRemaining} LEFT)`
-                  : `PLAY · ₱${displayBet}`}
-            </button>
-
-            <div className="relative flex items-center gap-1.5">
+            {/* 2. Coins Bet Button (Opens Bronze Bet Matrix) */}
+            <div className="flex flex-col items-center gap-0.5 w-16">
               <button
                 type="button"
-                aria-label="Decrease bet"
-                disabled={isSpinning || isFreeSpinMode || betIndex === 0}
-                onClick={() => handleSelectBet(Math.max(0, betIndex - 1))}
-                className="rounded-xl border border-emerald-700 bg-[#052920] p-2.5 text-emerald-100 hover:border-amber-400 disabled:opacity-40 cursor-pointer"
+                disabled={isSpinning || isFreeSpinMode}
+                onClick={() => {
+                  playChipClink();
+                  setAutoMenuOpen(false);
+                  setBetDrawerOpen((v) => !v);
+                }}
+                title="Select Bet Amount"
+                className={`flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full border-2 shadow-lg active:scale-95 disabled:opacity-45 transition cursor-pointer ${
+                  betDrawerOpen
+                    ? 'border-amber-200 bg-gradient-to-b from-amber-400 to-amber-700 text-amber-950'
+                    : 'border-[#8c6443] bg-gradient-to-b from-[#5d3326] to-[#2e1510] text-amber-200 hover:border-amber-300'
+                }`}
               >
-                <Minus className="h-4 w-4" />
+                <Coins className="h-5 w-5" />
               </button>
+              <span className="font-mono-num text-[10px] font-bold text-amber-100 whitespace-nowrap leading-none">
+                Bet ₱{displayBet}
+              </span>
+            </div>
+
+            {/* 3. GIANT GLOWING CIRCULAR GOLDEN SPIN BUTTON */}
+            <div className="relative -mt-4 flex flex-col items-center">
               <button
                 type="button"
-                aria-label="Increase bet"
-                disabled={isSpinning || isFreeSpinMode || betIndex === SUPER_ACE_BETS.length - 1}
-                onClick={() => handleSelectBet(Math.min(SUPER_ACE_BETS.length - 1, betIndex + 1))}
-                className="rounded-xl border border-emerald-700 bg-[#052920] p-2.5 text-emerald-100 hover:border-amber-400 disabled:opacity-40 cursor-pointer"
+                disabled={isSpinning}
+                onClick={executeSpin}
+                aria-label={isFreeSpinMode ? 'Free Spin' : 'Spin Reels'}
+                className={`relative flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full border-[3px] border-[#fff5b5] shadow-[0_0_26px_rgba(251,191,36,0.75)] active:scale-95 disabled:opacity-80 transition cursor-pointer ${
+                  isFreeSpinMode
+                    ? 'bg-gradient-to-b from-yellow-200 via-amber-400 to-orange-600'
+                    : 'bg-gradient-to-b from-[#ffe878] via-[#f5a718] to-[#b86204]'
+                }`}
               >
-                <Plus className="h-4 w-4" />
+                <span className="pointer-events-none absolute inset-1 rounded-full border-2 border-white/55" />
+                <RotateCw
+                  className={`absolute inset-2 h-[calc(100%-16px)] w-[calc(100%-16px)] text-white/35 ${
+                    isSpinning ? 'animate-spin' : ''
+                  }`}
+                />
+                <span className="relative z-10 font-display text-xs sm:text-sm font-black tracking-wider text-amber-950 drop-shadow-[0_1px_0_rgba(255,255,255,0.7)]">
+                  {isSpinning
+                    ? '...'
+                    : isFreeSpinMode
+                      ? `FREE ${slotState.freeSpinsRemaining}`
+                      : 'CHOY'}
+                </span>
               </button>
+            </div>
 
+            {/* 4. Autoplay Circular Button */}
+            <div className="flex flex-col items-center gap-0.5 w-16">
               {autoSpinsLeft > 0 ? (
                 <button
                   type="button"
                   onClick={stopAutoSpin}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-red-600 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-red-500 transition-colors whitespace-nowrap cursor-pointer"
+                  className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full border-2 border-red-300 bg-gradient-to-b from-red-500 to-red-800 text-white shadow-lg active:scale-95 transition cursor-pointer"
+                  title="Stop Autoplay"
                 >
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                  Stop ({autoSpinsLeft === 9999 ? '∞' : autoSpinsLeft})
+                  <Square className="h-4 w-4 fill-current" />
                 </button>
               ) : (
                 <button
                   type="button"
-                  onClick={() => setAutoMenuOpen((v) => !v)}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-400/60 bg-[#052920] px-3 py-2.5 text-xs font-extrabold text-amber-300 hover:bg-amber-400 hover:text-emerald-950 transition-colors whitespace-nowrap cursor-pointer"
+                  onClick={() => {
+                    playChipClink();
+                    setBetDrawerOpen(false);
+                    setAutoMenuOpen((v) => !v);
+                  }}
+                  className={`flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full border-2 shadow-lg active:scale-95 transition cursor-pointer ${
+                    autoMenuOpen
+                      ? 'border-amber-200 bg-gradient-to-b from-amber-400 to-amber-700 text-amber-950'
+                      : 'border-[#8c6443] bg-gradient-to-b from-[#5d3326] to-[#2e1510] text-amber-200 hover:border-amber-300'
+                  }`}
+                  title="Autoplay Spins"
                 >
-                  <Repeat className="h-4 w-4" />
-                  Auto Spin
+                  <Repeat className="h-5 w-5" />
                 </button>
               )}
-
-              {autoMenuOpen && (
-                <div className="absolute bottom-12 right-0 z-40 w-48 rounded-2xl border border-amber-400/50 bg-[#052920] p-2.5 shadow-2xl space-y-1.5">
-                  <p className="text-[11px] font-bold text-amber-300 px-2 pb-1 border-b border-emerald-800">
-                    Select Auto Spins
-                  </p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {[10, 25, 50, 100].map((cnt) => (
-                      <button
-                        key={cnt}
-                        type="button"
-                        onClick={() => startAutoSpin(cnt)}
-                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-[#031c16] border border-emerald-800 py-2 text-xs font-mono-num font-bold text-white hover:border-amber-400 hover:text-amber-300 cursor-pointer"
-                      >
-                        <Play className="h-3 w-3" />
-                        {cnt}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => startAutoSpin(9999)}
-                    className="w-full rounded-xl bg-amber-400/20 border border-amber-400/50 py-2 text-xs font-bold text-amber-200 hover:bg-amber-400 hover:text-emerald-950 cursor-pointer"
-                  >
-                    Continuous (Until Stop)
-                  </button>
-                </div>
-              )}
+              <span className="text-[9px] font-semibold text-amber-200/80 whitespace-nowrap leading-none">
+                {autoSpinsLeft > 0
+                  ? `Stop (${autoSpinsLeft === 9999 ? '∞' : autoSpinsLeft})`
+                  : 'Autoplay'}
+              </span>
             </div>
+
+            {/* 5. Lightning TURBO / Slow Toggle Button (with fiery TURBO badge matching reference!) */}
+            <div className="relative flex flex-col items-center gap-0.5 w-14">
+              {spinSpeed === 'fast' && (
+                <span className="pointer-events-none absolute -top-5 inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-orange-600 via-amber-400 to-red-600 px-1.5 py-[1px] font-display text-[9px] font-black italic tracking-tight text-white shadow-[0_0_10px_rgba(249,115,22,0.9)]">
+                  <Flame className="h-2.5 w-2.5 fill-yellow-200 text-yellow-200" />
+                  TURBO
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  playChipClink();
+                  setSpinSpeed((s) => (s === 'slow' ? 'fast' : 'slow'));
+                }}
+                title={spinSpeed === 'fast' ? 'Switch to Slow Row-by-Row Drop' : 'Enable Turbo Fast Spin'}
+                className={`flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full border-2 shadow-lg active:scale-95 transition cursor-pointer ${
+                  spinSpeed === 'fast'
+                    ? 'border-amber-200 bg-gradient-to-b from-amber-400 via-orange-500 to-red-700 text-white shadow-[0_0_16px_rgba(249,115,22,0.75)]'
+                    : 'border-[#8c6443] bg-gradient-to-b from-[#5d3326] to-[#2e1510] text-amber-300 hover:border-amber-300'
+                }`}
+              >
+                <Zap className="h-5 w-5 fill-current" />
+              </button>
+              <span className="text-[9px] font-semibold text-amber-200/80 leading-none">
+                {spinSpeed === 'fast' ? 'Turbo' : 'Normal'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* BOTTOM DARK STATUS STRIP: VIP BADGE · BALANCE · WIN · CASH IN · SIGNAL */}
+        <div className="shrink-0 flex items-center justify-between gap-2 px-2 pt-1.5 pb-0.5 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="rounded bg-gradient-to-b from-slate-300 to-slate-500 px-1.5 py-0.5 font-mono-num text-[10px] font-black text-slate-950 shadow">
+              VIP {user.vip_level}
+            </span>
+            <div className="flex items-baseline gap-1 min-w-0">
+              <span className="text-[11px] font-semibold text-amber-300/90">Balance</span>
+              <span className="font-mono-num text-xs sm:text-sm font-black text-white truncate">
+                ₱{user.wallet_balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenCashIn}
+              title="Cash In Coins"
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-amber-950 hover:bg-amber-300 cursor-pointer shrink-0"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="flex items-baseline gap-1">
+              <span className="text-[10px] font-semibold text-emerald-300/85">Win</span>
+              <span
+                className={`font-mono-num text-xs sm:text-sm font-black ${
+                  lastWin > 0 ? 'text-amber-300' : 'text-slate-300'
+                }`}
+              >
+                <OdometerCounter targetValue={lastWin} prefix="₱" decimals={2} duration={800} />
+              </span>
+            </div>
+            <Wifi className="h-4 w-4 text-emerald-400" aria-label="Connected" />
           </div>
         </div>
       </div>
 
-      {/* BUY FREE SPIN SCATTER CONFIRMATION MODAL */}
+      {/* ==================== PAYTABLE & RULES MODAL (GEAR BUTTON) ==================== */}
+      <AnimatePresence>
+        {infoModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="w-full max-w-sm rounded-3xl border-2 border-[#c8a252] bg-[#1a140d] p-5 shadow-2xl space-y-4 text-stone-100"
+            >
+              <div className="flex items-center justify-between border-b border-[#4c3b20] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Info className="h-5 w-5 text-amber-400" />
+                  <h3 className="font-display text-base font-black text-amber-300">
+                    {theme.title} Features &amp; Rules
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInfoModalOpen(false)}
+                  className="rounded-lg p-1 text-amber-200/70 hover:text-white cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5 text-xs text-stone-200 leading-relaxed">
+                <p>{theme.featureSummary}</p>
+                <div className="rounded-xl border border-[#4c3b20] bg-black/35 p-3 space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-amber-300 font-bold">Regular Multipliers</span>
+                    <span className="font-mono-num font-bold">×1 · ×2 · ×3 · ×4 · ×5</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-300 font-bold">Free Spin Multipliers</span>
+                    <span className="font-mono-num font-bold">×2 · ×4 · ×6 · ×8 · ×10</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-300 font-bold">Buy Bonus (10 Free Spins)</span>
+                    <span className="font-mono-num font-bold">100× Active Bet</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-300 font-bold">Total Spins Played</span>
+                    <span className="font-mono-num font-bold">{slotState.totalRegularSpins}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {gameKey === 'superace' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInfoModalOpen(false);
+                      setShowIntroSplash(true);
+                    }}
+                    className="flex-1 rounded-xl border border-amber-400/50 bg-[#2d2112] py-2.5 text-xs font-bold text-amber-200 hover:bg-[#3d2d18] cursor-pointer"
+                  >
+                    Feature Guide
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setInfoModalOpen(false)}
+                  className="flex-1 rounded-xl bg-amber-400 py-2.5 text-xs font-black text-amber-950 hover:bg-amber-300 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== BUY FREE SPIN BONUS MODAL ==================== */}
       <AnimatePresence>
         {buyModalOpen && (
           <motion.div
@@ -1494,18 +1759,18 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
               initial={{ scale: 0.9, y: 12 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.92, opacity: 0 }}
-              className="w-full max-w-sm rounded-3xl border-2 border-amber-400 bg-[#052920] p-5 shadow-2xl space-y-4"
+              className="w-full max-w-sm rounded-3xl border-2 border-amber-400 bg-[#1c130b] p-5 shadow-2xl space-y-4"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2.5">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-400 text-emerald-950">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-red-800 border border-amber-300 text-amber-200">
                     <ShoppingBag className="h-5 w-5" />
                   </div>
                   <div>
                     <h3 className="font-display text-base font-extrabold text-amber-300">
-                      Buy Free Spin Scatter
+                      Buy Bonus Free Spins
                     </h3>
-                    <p className="text-[11px] text-emerald-200">
+                    <p className="text-[11px] text-amber-100/80">
                       Instant 3 Scatters · 10 Free Spins (×2–×10)
                     </p>
                   </div>
@@ -1513,22 +1778,22 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setBuyModalOpen(false)}
-                  className="rounded-lg p-1 text-emerald-300 hover:text-white cursor-pointer"
+                  className="rounded-lg p-1 text-amber-200/70 hover:text-white cursor-pointer"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="rounded-2xl border border-emerald-700 bg-[#021611] p-3.5 space-y-2 text-xs">
+              <div className="rounded-2xl border border-[#5b4523] bg-black/45 p-3.5 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-emerald-300">Active Bet Size</span>
+                  <span className="text-amber-200/80">Active Bet Size</span>
                   <strong className="font-mono-num text-white">₱{selectedBet}</strong>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-emerald-300">Buy Free Spin Multiplier</span>
+                  <span className="text-amber-200/80">Buy Bonus Multiplier</span>
                   <strong className="font-mono-num text-amber-300">100× Bet</strong>
                 </div>
-                <div className="flex items-center justify-between border-t border-emerald-800 pt-2">
+                <div className="flex items-center justify-between border-t border-[#4b381b] pt-2">
                   <span className="font-bold text-amber-200">Total Buy Cost</span>
                   <strong className="font-mono-num text-lg font-black text-amber-300">
                     ₱{buySpinCost.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
@@ -1546,7 +1811,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setBuyModalOpen(false)}
-                  className="flex-1 rounded-xl border border-emerald-700 bg-[#031c16] py-2.5 text-xs font-bold text-emerald-200 hover:text-white cursor-pointer"
+                  className="flex-1 rounded-xl border border-[#5b4523] bg-[#2a1f13] py-2.5 text-xs font-bold text-amber-100 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1554,7 +1819,7 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
                   type="button"
                   disabled={user.wallet_balance < buySpinCost || isSpinning}
                   onClick={executeBuySpin}
-                  className="flex-1 rounded-xl bg-amber-400 py-2.5 text-xs font-black text-emerald-950 hover:bg-amber-300 disabled:opacity-45 cursor-pointer"
+                  className="flex-1 rounded-xl bg-amber-400 py-2.5 text-xs font-black text-amber-950 hover:bg-amber-300 disabled:opacity-45 cursor-pointer"
                 >
                   Buy Now (₱{buySpinCost})
                 </button>
@@ -1566,3 +1831,4 @@ export const SuperAceSlotView: React.FC<SuperAceSlotViewProps> = ({
     </div>
   );
 };
+

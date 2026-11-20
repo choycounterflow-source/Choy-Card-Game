@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   Check,
@@ -43,6 +43,7 @@ import {
   copyTextReliable,
   normalizeToPublicShareUrl,
 } from '../lib/shareUrl';
+import { ConfettiCanvas, type ConfettiCanvasRef } from './ConfettiCanvas';
 
 export interface WeeklyLeaderItem {
   rank: number;
@@ -86,6 +87,7 @@ interface PlayerDashboardProps {
   publicShareOrigin?: string;
   onOpenShareModal?: () => void;
   onBackToAdmin?: () => void;
+  onOpenCockfight?: () => void;
 }
 
 type DashTab = 'lobby' | 'tournaments' | 'vip' | 'agent' | 'wallet' | 'notifications';
@@ -260,8 +262,20 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
   const vip2CashProgress = Math.min(100, Math.round((profile.total_cash_in / 1000) * 100));
   const vip2BetProgress = Math.min(100, Math.round((profile.total_bet / 10000) * 100));
 
+  const confettiRef = useRef<ConfettiCanvasRef>(null);
+  const prevVipRef = useRef<number>(profile.vip_level);
+
+  useEffect(() => {
+    if (profile.vip_level > prevVipRef.current) {
+      prevVipRef.current = profile.vip_level;
+      playWinFanfare();
+      confettiRef.current?.trigger();
+    }
+  }, [profile.vip_level]);
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-5 space-y-6">
+      <ConfettiCanvas ref={confettiRef} />
       {/* Admin Preview Return Banner (when Admin previews Player Lobby) */}
       {onBackToAdmin && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-400/50 bg-amber-950/35 px-4 py-3 text-xs">
@@ -363,6 +377,17 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
                   <span className="rounded-full bg-amber-400/20 border border-amber-400/60 px-2 py-0.5 text-[10px] font-extrabold text-amber-300 uppercase">
                     {profile.vip_level >= 2 ? 'Master Elite' : 'Active Member'}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playWinFanfare();
+                      confettiRef.current?.trigger();
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-2 py-0.5 text-[10px] font-black text-emerald-950 hover:bg-amber-300 transition cursor-pointer shadow"
+                    title="Celebrate VIP Tier Progress"
+                  >
+                    🎉 Celebrate VIP
+                  </button>
                 </div>
                 <p className="text-xs text-emerald-200">
                   {profile.vip_level >= 2
@@ -543,7 +568,9 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
 
                   const handleGameCardClick = () => {
                     if (!canOpen) return;
-                    if (isSlot) {
+                    if (g.game_key === 'cockfight') {
+                      onOpenCockfight?.();
+                    } else if (isSlot) {
                       onOpenSlotGame(g.game_key as SlotGameKey);
                     } else {
                       onOpenGameSetup(g);

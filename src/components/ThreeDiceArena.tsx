@@ -8,18 +8,15 @@ import {
   Dices,
   LogOut,
   RotateCcw,
-  Volume2,
-  VolumeX,
 } from 'lucide-react';
 import { BET_TIERS, type UserProfile } from '../types';
 import {
-  isAudioMuted,
   playChipClink,
   playDiceRoll,
   playWinFanfare,
   playCardDrop,
-  setAudioMuted,
 } from '../lib/audio';
+import { AudioControlButton } from './AudioControlButton';
 
 interface ThreeDiceArenaProps {
   user: UserProfile | null;
@@ -252,7 +249,6 @@ export const ThreeDiceArena: React.FC<ThreeDiceArenaProps> = ({ user, onExit, on
   const [rolledColors, setRolledColors] = useState<string[]>(['red', 'yellow', 'green']);
   const [roundBanner, setRoundBanner] = useState<{ title: string; detail: string; won: boolean } | null>(null);
   const [liveWallet, setLiveWallet] = useState<number>(user ? user.wallet_balance : 0);
-  const [muted, setMuted] = useState(isAudioMuted());
   const [roundCountdown, setRoundCountdown] = useState<number>(30);
 
   // Sync refs so the isolated WebGL render loop never restarts on React state updates
@@ -988,12 +984,6 @@ export const ThreeDiceArena: React.FC<ThreeDiceArenaProps> = ({ user, onExit, on
     sceneActionsRef.current?.setCameraGoal(preset);
   };
 
-  const toggleAudio = () => {
-    const next = !muted;
-    setMuted(next);
-    setAudioMuted(next);
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-[#031812] overflow-hidden select-none">
       {/* Isolated Full-Bleed WebGL Canvas Container */}
@@ -1111,14 +1101,7 @@ export const ThreeDiceArena: React.FC<ThreeDiceArenaProps> = ({ user, onExit, on
             </div>
 
             <div className="pointer-events-auto flex items-center gap-2">
-              <button
-                type="button"
-                onClick={toggleAudio}
-                aria-label={muted ? 'Unmute audio' : 'Mute audio'}
-                className="rounded-xl border border-emerald-700 bg-[#031812]/92 p-2.5 text-emerald-100 hover:border-amber-400 cursor-pointer"
-              >
-                {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-              </button>
+              <AudioControlButton variant="compact" align="right" />
               <button
                 type="button"
                 onClick={onExit}

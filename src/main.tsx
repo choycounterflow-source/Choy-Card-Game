@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import { AudioProvider } from './contexts/AudioContext.tsx';
 import './index.css';
 
 // Register our clean installable PWA service worker and remove any legacy broken dev-sw registrations
@@ -63,6 +64,8 @@ class RootErrorBoundary extends React.Component<
 
 createRoot(document.getElementById('root')!).render(
   <RootErrorBoundary>
-    <App />
+    <AudioProvider>
+      <App />
+    </AudioProvider>
   </RootErrorBoundary>
 );
