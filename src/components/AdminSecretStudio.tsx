@@ -38,6 +38,8 @@ import {
 } from 'lucide-react';
 import type { Transaction, UserProfile } from '../types';
 import { copyTextReliable } from '../lib/shareUrl';
+import { DeploymentHistory } from './DeploymentHistory';
+import { GithubRepoSync } from './GithubRepoSync';
 
 interface AdminSecretStudioProps {
   admin: UserProfile;
@@ -1536,6 +1538,19 @@ export const AdminSecretStudio: React.FC<AdminSecretStudioProps> = ({ admin, onC
                 </button>
               </div>
 
+              {/* GitHub Repository Sync Section */}
+              <GithubRepoSync
+                adminId={admin.id}
+                githubRepoUrl={githubRepoUrl}
+                githubBranch={githubBranch}
+                githubOwnerRepo={deployStatus?.githubOwnerRepo}
+                hasGithubToken={hasGithubToken}
+                recentCommits={deployStatus?.recentCommits || []}
+                commitsError={deployStatus?.commitsError}
+                onRefresh={loadDeployStatus}
+                loading={loadingDeploy}
+              />
+
               {/* Feedback Banner */}
               {deployFeedback && (
                 <div
@@ -1891,6 +1906,9 @@ export const AdminSecretStudio: React.FC<AdminSecretStudioProps> = ({ admin, onC
                   </p>
                 )}
               </div>
+
+              {/* Card 4: Render Deployment History */}
+              <DeploymentHistory adminId={admin.id} renderUrl={renderUrl} />
             </div>
           )}
 

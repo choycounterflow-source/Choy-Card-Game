@@ -617,50 +617,62 @@ export const TableBuyInModal: React.FC<TableBuyInModalProps> = ({
               No tables configured for this mode yet.
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {visibleTables.map((tbl) => {
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {visibleTables.map((tbl, idx) => {
                 const isSelected = activeTable?.id === tbl.id;
                 const disabled = !tbl.is_enabled && user.role !== 'admin';
                 const affordable = user.wallet_balance >= tbl.min_wallet;
+
+                // Rank tier mapping matching reference screenshot
+                const tierMeta =
+                  tbl.bet_amount <= 0.05
+                    ? { name: 'PRACTICE', badgeBg: 'from-slate-600 to-slate-800 text-slate-100 border-slate-400/50', entry: '0.01-1' }
+                    : tbl.bet_amount <= 0.5
+                      ? { name: 'NEWBIE', badgeBg: 'from-emerald-600 to-teal-800 text-emerald-100 border-emerald-400/50', entry: '4-10' }
+                      : tbl.bet_amount <= 1.0
+                        ? { name: 'INTER', badgeBg: 'from-blue-600 to-cyan-800 text-blue-100 border-blue-400/50', entry: '10-20' }
+                        : tbl.bet_amount <= 3.0
+                          ? { name: 'SUPER', badgeBg: 'from-purple-600 to-fuchsia-800 text-purple-100 border-purple-400/50', entry: '45-100' }
+                          : { name: 'EXPERT', badgeBg: 'from-amber-500 to-orange-700 text-amber-100 border-amber-300/60', entry: '75-150' };
+
                 return (
                   <button
                     key={tbl.id}
                     type="button"
                     disabled={disabled}
                     onClick={() => setSelectedTableId(tbl.id)}
-                    className={`rounded-xl p-3 text-left border transition-all ${
+                    className={`relative overflow-hidden rounded-2xl p-3 text-left border transition-all flex flex-col justify-between gap-2 shadow-lg ${
                       disabled
                         ? 'bg-[#02140f]/80 border-red-900/50 text-emerald-400/50 opacity-55 cursor-not-allowed'
                         : isSelected
-                          ? 'bg-amber-400 text-emerald-950 border-white ring-2 ring-amber-200/70 shadow-lg cursor-pointer'
+                          ? 'bg-gradient-to-br from-emerald-500/30 to-amber-500/30 border-amber-400 ring-2 ring-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.35)] cursor-pointer'
                           : affordable
-                            ? 'bg-[#031c16] text-emerald-50 border-emerald-700/80 hover:border-amber-400 cursor-pointer'
-                            : 'bg-[#031c16]/75 text-emerald-200/80 border-emerald-900 hover:border-amber-400/50 cursor-pointer'
+                            ? 'bg-gradient-to-br from-[#04241c] to-[#02140f] text-white border-emerald-600/80 hover:border-amber-400 cursor-pointer'
+                            : 'bg-[#031c16]/75 text-emerald-200 border-emerald-900 hover:border-amber-400/50 cursor-pointer'
                     }`}
                   >
+                    {/* Hexagon Rank Badge Header */}
                     <div className="flex items-center justify-between gap-1">
-                      <span className="font-mono-num text-base font-black leading-tight">
-                        Bet ₱{tbl.bet_amount}
-                      </span>
-                      <span
-                        className={`font-mono-num text-[10px] font-bold ${
-                          disabled
-                            ? 'text-red-300'
-                            : isSelected
-                              ? 'text-emerald-950'
-                              : 'text-emerald-300'
-                        }`}
-                      >
+                      <div className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r ${tierMeta.badgeBg} px-2 py-0.5 font-mono-num text-[10px] font-black tracking-wider border shadow-sm`}>
+                        <span>⬡</span>
+                        <span>{tierMeta.name}</span>
+                      </div>
+                      <span className="font-mono-num text-[10px] font-bold text-emerald-300">
                         {disabled ? 'OFF' : `${tbl.active_players}/${tbl.max_players}P`}
                       </span>
                     </div>
-                    <div
-                      className={`mt-1 flex items-center justify-between text-[10px] font-mono-num ${
-                        isSelected ? 'text-emerald-950/90 font-bold' : 'text-emerald-300/90'
-                      }`}
-                    >
-                      <span>Min ₱{tbl.min_wallet}</span>
-                      <span>{disabled ? 'Disabled' : isTongits ? `${tbl.variant}` : 'Open'}</span>
+
+                    {/* Bet Amount */}
+                    <div className="py-1 text-center">
+                      <span className="text-[10px] uppercase font-bold text-emerald-300 block">Bet Amount</span>
+                      <strong className="font-mono-num text-lg font-black text-amber-300 tracking-tight">
+                        ₱{tbl.bet_amount}
+                      </strong>
+                    </div>
+
+                    {/* Entry Range Footer */}
+                    <div className="rounded-xl border border-white/10 bg-black/35 px-2 py-1 text-center font-mono-num text-[10px] font-bold text-emerald-200">
+                      Entry: {tierMeta.entry}
                     </div>
                   </button>
                 );

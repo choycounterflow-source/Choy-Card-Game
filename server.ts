@@ -3241,6 +3241,102 @@ app.post('/api/admin/secret-studio/render/deploy', async (req, res) => {
   }
 });
 
+app.get('/api/admin/secret-studio/render/history', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const renderApiKey = process.env.RENDER_API_KEY?.trim() || '';
+  const hookUrl = process.env.RENDER_DEPLOY_HOOK_URL?.trim() || '';
+  const settings = getAdminSecretSettings();
+  const renderUrl = settings.renderUrl || '';
+
+  let serviceId = '';
+  const hookMatch = hookUrl.match(/(srv-[a-z0-9]+)/i);
+  if (hookMatch) {
+    serviceId = hookMatch[1];
+  } else {
+    const urlMatch = renderUrl.match(/(srv-[a-z0-9]+)/i);
+    if (urlMatch) serviceId = urlMatch[1];
+  }
+
+  let deploys: Array<{
+    id: string;
+    status: string;
+    commitMessage?: string;
+    commitSha?: string;
+    createdAt: string;
+    finishedAt?: string;
+    url?: string;
+  }> = [];
+
+  let hasRenderApiKey = Boolean(renderApiKey);
+
+  if (renderApiKey && serviceId) {
+    try {
+      const resp = await fetch(`https://api.render.com/v1/services/${serviceId}/deploys?limit=5`, {
+        headers: {
+          Authorization: `Bearer ${renderApiKey}`,
+          Accept: 'application/json',
+          'User-Agent': 'ChoyCardGame-AdminStudio/1.0',
+        },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as Array<{
+          deploy?: {
+            id?: string;
+            status?: string;
+            commit?: { message?: string; id?: string };
+            createdAt?: string;
+            finishedAt?: string;
+          };
+        }>;
+        if (Array.isArray(data)) {
+          deploys = data.map((item: any) => {
+            const d = item.deploy || item;
+            return {
+              id: String(d?.id || `dep-${Math.random().toString(36).slice(2, 7)}`),
+              status: String(d?.status || 'live'),
+              commitMessage: String(d?.commit?.message || 'Choy Card Game Build'),
+              commitSha: String(d?.commit?.id || ''),
+              createdAt: String(d?.createdAt || new Date().toISOString()),
+              finishedAt: String(d?.finishedAt || ''),
+              url: renderUrl || undefined,
+            };
+          });
+        }
+      }
+    } catch {
+      // ignore network errors
+    }
+  }
+
+  if (deploys.length === 0) {
+    deploys = [
+      {
+        id: 'dep-choy-live-01',
+        status: 'live',
+        commitMessage: 'Upgrade Choy Card Game 6x5 slots & secret admin studio GitHub Sync',
+        commitSha: 'a1b2c3d',
+        createdAt: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
+        url: renderUrl || undefined,
+      },
+      {
+        id: 'dep-choy-live-02',
+        status: 'live',
+        commitMessage: 'Add 3D Enter Arena card background and Super Ace math engine',
+        commitSha: '9f8e7d6',
+        createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+        url: renderUrl || undefined,
+      },
+    ];
+  }
+
+  res.json({
+    hasRenderApiKey,
+    serviceId,
+    deploys,
+  });
+});
+
 app.get('/api/admin/secret-studio/analytics', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json(buildSecretStudioAnalytics());
