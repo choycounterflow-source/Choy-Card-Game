@@ -105,24 +105,27 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
           </div>
         </div>
 
-        {/* Auth Card Column (Matched with 3D App Icon Background Image) */}
-        <div className="lg:col-span-5 relative overflow-hidden rounded-3xl border border-emerald-800/80 bg-[#052920] p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
+        {/* Auth Card Column (Matched with 3D App Icon Background Image & Choy Game Card Branding) */}
+        <div className="lg:col-span-5 relative overflow-hidden rounded-3xl border border-emerald-400/40 bg-[#031c16]/70 backdrop-blur-md p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
           <img
             src={choyAppIconImg}
-            alt="Choy Card Game 3D player holding Joker playing card"
+            alt="Choy Card Game 3D player holding Choy Game playing card"
             referrerPolicy="no-referrer"
-            className="pointer-events-none absolute inset-0 h-full w-full object-cover object-top opacity-90"
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover object-top brightness-110 contrast-105 saturate-105 opacity-90"
           />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#02140f] via-[#02140f]/80 to-[#02140f]/45" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#02140f] via-[#02140f]/75 to-[#02140f]/35" />
 
           <div className="relative z-10">
             <PWAInstallButton variant="banner" />
-            <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-4">
+            <div className="flex items-center justify-between gap-2 border-b border-white/20 pb-4">
               <div>
-                <h2 className="font-display text-2xl font-extrabold text-white drop-shadow">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-0.5 text-[11px] font-extrabold text-emerald-950 shadow mb-1.5">
+                  <span>🃏 Choy Game Card Table</span>
+                </div>
+                <h2 className="font-display text-2xl font-extrabold text-white drop-shadow-md">
                   {mode === 'login' ? 'Enter Arena' : 'Create Player Account'}
                 </h2>
-                <p className="text-xs text-emerald-200 mt-0.5 drop-shadow-xs">
+                <p className="text-xs text-emerald-200/90 mt-0.5 drop-shadow-xs">
                   {mode === 'login'
                     ? 'Sign in with your mobile number or Admin credentials'
                     : 'Create your player account to join live tables & slots'}

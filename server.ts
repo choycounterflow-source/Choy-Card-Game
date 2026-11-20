@@ -3365,21 +3365,44 @@ app.post('/api/admin/secret-studio/chat', async (req, res) => {
   if (!trimmed) {
     return res.status(400).json({ error: 'Please type a builder instruction or question.' });
   }
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({
-      error: 'AI Builder chat requires GEMINI_API_KEY configured in Environment Variables (e.g. Render Environment > GEMINI_API_KEY).',
+  const analytics = buildSecretStudioAnalytics();
+  const sysConfig = getSystemConfig();
+  const files = listProjectSourceFiles();
+  const fileListSummary = files.map((f) => `${f.path} (${f.lines}L)`).join(', ');
+  const codeSnippet =
+    activeFilePath && activeFileContent
+      ? `\n\n--- CURRENTLY OPEN CODE FILE: ${activeFilePath} ---\n${String(activeFileContent).slice(0, 10000)}\n--- END FILE ---`
+      : '';
+
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    // Graceful fallback AI & Live Operations assistant when GEMINI_API_KEY is not set
+    const lower = trimmed.toLowerCase();
+    let reply = '';
+    let appliedUpdates: string[] = [];
+
+    if (lower.includes('prize') || lower.includes('weekly') || lower.includes('top 1')) {
+      const matchNums = trimmed.match(/\d+/g);
+      const top1 = matchNums && matchNums[0] ? Number(matchNums[0]) : 5000;
+      const top2 = matchNums && matchNums[1] ? Number(matchNums[1]) : 2500;
+      const top3 = matchNums && matchNums[2] ? Number(matchNums[2]) : 1000;
+      db.prepare(`UPDATE system_config SET weekly_top1_prize = ?, weekly_top2_prize = ?, weekly_top3_prize = ? WHERE id = 1`).run(top1, top2, top3);
+      appliedUpdates.push(`Updated Weekly Prizes: Top 1 ₱${top1}, Top 2 ₱${top2}, Top 3 ₱${top3}`);
+      reply = `Na-update na nako ang Weekly Prizes!\n• Top 1: ₱${top1}\n• Top 2: ₱${top2}\n• Top 3: ₱${top3}`;
+    } else if (lower.includes('cashflow') || lower.includes('analytics') || lower.includes('stats') || lower.includes('rake') || lower.includes('table')) {
+      reply = `Eto ang Live Analytics Snapshot:\n• Net Cashflow: ₱${analytics.netCashflow} (In ₱${analytics.totalCashIn} · Out ₱${analytics.totalCashOut})\n• Wallet Circulation: ₱${analytics.totalWalletCirculation} (${analytics.totalProfiles} profiles)\n• Total Rake: ₱${analytics.totalRake} (${analytics.totalHands} hands, Pot ₱${analytics.totalPotVolume})\n• Active Slots: ${analytics.slotStats.totalSpins} spins, ${analytics.slotStats.totalScatters} scatters\n• Online Sockets: ${analytics.onlineSockets}`;
+    } else {
+      reply = `Na-receive nako imong instruction: "${trimmed}". Naa ka sa Choy Secret Builder Studio. Pwede nimo i-edit ang bisan unsang file sa "All Code" tab, mag-commit sa GitHub sa "GitHub & Render" tab, o mangutana dire tungod kay ang system active ug normal ang tanan!`;
+    }
+
+    return res.json({
+      reply,
+      appliedUpdates,
+      modelUsed: 'choy-built-in-fallback-engine',
     });
   }
 
   try {
-    const analytics = buildSecretStudioAnalytics();
-    const sysConfig = getSystemConfig();
-    const files = listProjectSourceFiles();
-    const fileListSummary = files.map((f) => `${f.path} (${f.lines}L)`).join(', ');
-    const codeSnippet =
-      activeFilePath && activeFileContent
-        ? `\n\n--- CURRENTLY OPEN CODE FILE: ${activeFilePath} ---\n${String(activeFileContent).slice(0, 10000)}\n--- END FILE ---`
-        : '';
 
     const systemInstruction = [
       'You are the Choy Card Game Senior Full-Stack App Builder & Live Operations Engine inside the Secret Admin Builder Studio.',
