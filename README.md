@@ -1,11 +1,11 @@
-<div align="center">
+# Choy Card Game
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Real-time multiplayer Filipino card, dice & 6×5 cascading slot PWA featuring Tong-its (2P/3P Regular, Butasan, Joker), Pusoy, Lucky 9, Texas Poker, Color Game, Bet Game, Tsekitsa, Super Ace Slots, Admin Control Panel, and Secret Builder Studio.
 
-  <h1>Built with AI Studio</h2>
+## Quick Deploy (Render / Docker)
 
-  <p>The fastest path from prompt to production with Gemini.</p>
-
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>
+- **Runtime**: Docker (`Dockerfile` included) or Node 22+
+- **Build Command** (if using Node runtime): `npm install && npm run build`
+- **Start Command**: `npm start`
+- **Health Check**: `/api/health`
+- **Optional Environment Variable**: `GEMINI_API_KEY` (for Ask Choy AI & Admin Secret Studio AI)

@@ -1,0 +1,6 @@
+{
+  "name": "ChoyJiez Card Hub",
+  "description": "Real-time multiplayer Filipino card & dice arena featuring Tong-its, Pusoy, Lucky 9, Poker, Color Game, Bet Game, Tsekitsa, VIP cashback, 2km GPS anti-collusion, Admin control panel, and Ask Choy AI.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

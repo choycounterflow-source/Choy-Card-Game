@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Outfit', system-ui, sans-serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #031c16;
+    color: #ecfdf5;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  .font-mono-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.felt-surface {
+  background-color: #084c33;
+  background-image:
+    radial-gradient(ellipse at 50% 45%, rgba(16, 128, 84, 0.88) 0%, rgba(7, 74, 49, 0.94) 65%, rgba(3, 38, 26, 0.98) 100%),
+    url('/src/assets/images/choyjiez_table_felt_1795073314221.jpg');
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 64px rgba(0, 0, 0, 0.72), 0 18px 40px rgba(0, 0, 0, 0.6);
+  border: 6px solid #592512;
+  outline: 1px solid rgba(245, 184, 46, 0.35);
+}
+
+.card-back-pattern {
+  background-color: #881337;
+  background-image:
+    repeating-linear-gradient(45deg, rgba(253, 224, 71, 0.22) 0px, rgba(253, 224, 71, 0.22) 1.5px, transparent 1.5px, transparent 7px),
+    repeating-linear-gradient(-45deg, rgba(253, 224, 71, 0.22) 0px, rgba(253, 224, 71, 0.22) 1.5px, transparent 1.5px, transparent 7px),
+    radial-gradient(circle at center, #b91c1c 0%, #7f1d1d 65%, #450a0a 100%);
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.55);
+}
+
+.playing-card-face {
+  background: linear-gradient(165deg, #fffef9 0%, #ffffff 62%, #f4efe4 100%);
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.playing-card-face:hover {
+  transform: translateY(-6px);
+}
+
+.playing-card-selected {
+  transform: translateY(-16px) !important;
+  box-shadow: 0 14px 24px rgba(245, 184, 46, 0.45), 0 0 0 2.5px #f5b82e !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playing-card-face {
+    transition: none;
+  }
+}
+
+/* Custom thin scrollbars for dark emerald panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(3, 28, 22, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.35);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 184, 46, 0.55);
+}

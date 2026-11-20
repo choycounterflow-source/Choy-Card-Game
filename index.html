@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" class="bg-[#031c16]">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Choy Card Game — Pro Multiplayer Card & Dice Arena</title>
+    <meta name="description" content="Real-time multiplayer Filipino card, dice & 6×5 slot arena featuring Tong-its, Pusoy, Lucky 9, Poker, Color Game, Bet Game, Tsekitsa, Super Ace, VIP cashback, 2km GPS anti-collusion, and Ask Choy AI." />
+    <meta property="og:title" content="Choy Card Game — Pro Multiplayer Card & Dice Arena" />
+    <meta property="og:description" content="Real-time multiplayer Tong-its, Pusoy, Lucky 9, Poker, Color Game, Bet Game, Tsekitsa & Super Ace PWA with 2km GPS protection and VIP rewards." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://ais-pre-esajh5tb77exk5tdp6dme7-893033407659.asia-northeast1.run.app/" />
+    <meta property="og:image" content="https://ais-pre-esajh5tb77exk5tdp6dme7-893033407659.asia-northeast1.run.app/choy-face-512.png?v=3" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#04291f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Choy Card" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/choy-face-apple-180.png?v=3" />
+    <link rel="shortcut icon" type="image/png" href="/choy-face-favicon-64.png?v=3" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/choy-face-favicon-64.png?v=3" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/choy-face-192.png?v=3" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/choy-face-512.png?v=3" />
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <script>
+      // Capture Chrome's install prompt immediately even if fired before React mounts
+      window.__choyDeferredInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__choyDeferredInstallPrompt = e;
+        window.dispatchEvent(new CustomEvent('choy-pwa-prompt-ready'));
+      });
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Outfit:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#031c16] text-emerald-50 antialiased selection:bg-amber-400/30 selection:text-amber-200">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
