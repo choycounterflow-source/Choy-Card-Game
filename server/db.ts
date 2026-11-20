@@ -48,6 +48,9 @@ export function initDatabase(): void {
       last_cashout_date TEXT,
       last_lat REAL,
       last_lng REAL,
+      daily_streak INTEGER NOT NULL DEFAULT 0,
+      last_checkin_date TEXT,
+      checkin_claimed_days TEXT NOT NULL DEFAULT '[]',
       bot_win_rate INTEGER NOT NULL DEFAULT 80,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -184,6 +187,15 @@ export function initDatabase(): void {
   }
   if (!profileCols.some((col) => col.name === 'welcome_scatter_eligible')) {
     db.exec(`ALTER TABLE profiles ADD COLUMN welcome_scatter_eligible INTEGER NOT NULL DEFAULT 1;`);
+  }
+  if (!profileCols.some((col) => col.name === 'daily_streak')) {
+    db.exec(`ALTER TABLE profiles ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0;`);
+  }
+  if (!profileCols.some((col) => col.name === 'last_checkin_date')) {
+    db.exec(`ALTER TABLE profiles ADD COLUMN last_checkin_date TEXT;`);
+  }
+  if (!profileCols.some((col) => col.name === 'checkin_claimed_days')) {
+    db.exec(`ALTER TABLE profiles ADD COLUMN checkin_claimed_days TEXT NOT NULL DEFAULT '[]';`);
   }
 
   // Safe migration for per-table enable/disable on game_tables
@@ -609,6 +621,9 @@ export function sanitizeProfile(row: Record<string, unknown>): UserProfile {
     last_cashout_date: row.last_cashout_date ? String(row.last_cashout_date) : null,
     last_lat: row.last_lat !== null && row.last_lat !== undefined ? Number(row.last_lat) : null,
     last_lng: row.last_lng !== null && row.last_lng !== undefined ? Number(row.last_lng) : null,
+    daily_streak: Number(row.daily_streak ?? 0),
+    last_checkin_date: row.last_checkin_date ? String(row.last_checkin_date) : null,
+    checkin_claimed_days: row.checkin_claimed_days ? String(row.checkin_claimed_days) : '[]',
     bot_win_rate: Number(row.bot_win_rate ?? 80),
     created_at: String(row.created_at),
   };

@@ -3,7 +3,8 @@ import { ArrowRight, KeyRound, MapPin, UserPlus } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { PWAInstallButton } from './PWAControls';
 import lobbyHeroImg from '../assets/images/choyjiez_lobby_hero_1795073315513.jpg';
-import choyAppIconImg from '../assets/images/choyjiez_app_icon_1795076018851.jpg';
+import choyAppIconImg from '../assets/images/choy_app_icon_1795198096662.jpg';
+import { AgeVerificationSplash } from './AgeVerificationSplash';
 
 interface LoginViewProps {
   gpsStatus: string;
@@ -11,6 +12,14 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }) => {
+  const [ageVerified, setAgeVerified] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('choy_age_verified') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -60,6 +69,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
       setLoading(false);
     }
   };
+
+  if (!ageVerified) {
+    return (
+      <AgeVerificationSplash
+        onVerified={() => {
+          try {
+            sessionStorage.setItem('choy_age_verified', 'true');
+          } catch {}
+          setAgeVerified(true);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 lg:py-10">
@@ -267,8 +289,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
             </form>
           </div>
 
-          <div className="relative z-10 mt-6 border-t border-white/15 pt-4 text-xs text-emerald-200 leading-relaxed">
-            New players can switch to <strong className="text-amber-300">Register Player</strong> above to create an account with a 4-digit withdrawal PIN and join live tables immediately.
+          <div className="relative z-10 mt-6 border-t border-white/15 pt-4 text-xs text-emerald-200 leading-relaxed space-y-3">
+            <p>
+              New players can switch to <strong className="text-amber-300">Register Player</strong> above to create an account with a 4-digit withdrawal PIN and join live tables immediately.
+            </p>
+
+            {/* PAGCOR Compliance Notice Co-located in Vacant Space */}
+            <div className="rounded-2xl border border-amber-400/40 bg-[#02140f]/90 p-3 text-[10px] text-emerald-200/90 space-y-1.5 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="rounded bg-blue-600 px-1.5 py-0.5 font-display font-black text-white text-[9px]">PAGCOR</span>
+                  <span className="font-bold text-white">Regulated Gaming</span>
+                </div>
+                <span className="rounded-full bg-red-950 border border-red-500/60 px-2 py-0.5 text-[9px] font-extrabold text-red-200">
+                  21+ · Know When To Stop
+                </span>
+              </div>
+              <p className="text-[9px] text-emerald-300/85">
+                Not allowed for Government Officials, AFP/PNP personnel, persons under 21, NDRP list, and GEL holders.
+              </p>
+            </div>
           </div>
         </div>
       </div>

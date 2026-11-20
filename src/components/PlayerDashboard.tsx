@@ -37,6 +37,7 @@ import {
   VIP_RULES,
 } from '../types';
 import { GAME_ART_MAP } from '../lib/gameImages';
+import { playWinFanfare } from '../lib/audio';
 import {
   buildPlayerShareLink,
   copyTextReliable,
@@ -125,6 +126,48 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [pinMsg, setPinMsg] = useState('');
+
+  // Daily Login Check-in state & handler
+  const [claimingDay, setClaimingDay] = useState<number | null>(null);
+  const [txSubTab, setTxSubTab] = useState<'cash_in' | 'cash_out' | 'other'>('cash_in');
+
+  const cashInTxs = useMemo(() => transactions.filter((t) => t.type === 'cash_in'), [transactions]);
+  const cashOutTxs = useMemo(() => transactions.filter((t) => t.type === 'cash_out'), [transactions]);
+  const otherTxs = useMemo(() => transactions.filter((t) => t.type !== 'cash_in' && t.type !== 'cash_out'), [transactions]);
+
+  const activeTxs = txSubTab === 'cash_in' ? cashInTxs : txSubTab === 'cash_out' ? cashOutTxs : otherTxs;
+
+  const claimedDaysList = useMemo(() => {
+    try {
+      return JSON.parse(profile.checkin_claimed_days || '[]') as number[];
+    } catch {
+      return [];
+    }
+  }, [profile.checkin_claimed_days]);
+
+  const handleClaimDaily = async (dayNum: number) => {
+    if (claimingDay !== null) return;
+    setClaimingDay(dayNum);
+    try {
+      const res = await fetch('/api/player/daily-checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.id, dayNumber: dayNum }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Could not claim daily reward.');
+        setClaimingDay(null);
+        return;
+      }
+      playWinFanfare();
+      onRefresh();
+    } catch {
+      alert('Network error while claiming daily reward.');
+    } finally {
+      setClaimingDay(null);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/tournaments?userId=${encodeURIComponent(profile.id)}`)
@@ -305,6 +348,56 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
           </div>
         </div>
 
+        {/* Dynamic VIP Tier Badge & Activity Progress Component */}
+        <div className="mt-5 rounded-2xl border border-amber-400/50 bg-gradient-to-r from-[#03241b] via-[#052920] to-[#03241b] p-4 sm:p-5 shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-500 text-emerald-950 shadow-[0_0_20px_rgba(251,191,36,0.5)]">
+                <Crown className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-display text-sm sm:text-base font-extrabold text-white">
+                    VIP Tier Status: <span className="text-amber-300">{vipCfg.name}</span>
+                  </h2>
+                  <span className="rounded-full bg-amber-400/20 border border-amber-400/60 px-2 py-0.5 text-[10px] font-extrabold text-amber-300 uppercase">
+                    {profile.vip_level >= 2 ? 'Master Elite' : 'Active Member'}
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-200">
+                  {profile.vip_level >= 2
+                    ? 'Maximum VIP 2 priority rewards & 3x daily cashouts active.'
+                    : `Total Game Bets: ₱${profile.total_bet.toLocaleString()} · Cash-in: ₱${profile.total_cash_in.toLocaleString()}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="w-full md:w-68 space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-bold">
+                <span className="text-emerald-300">
+                  {profile.vip_level >= 2 ? 'VIP 2 Max Reached' : 'Progress to VIP 2'}
+                </span>
+                <span className="font-mono-num text-amber-300">
+                  {profile.vip_level >= 2 ? '100%' : `${vip2BetProgress}%`}
+                </span>
+              </div>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/60 border border-emerald-800">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-400 via-yellow-300 to-emerald-400 transition-all duration-700 ease-out"
+                  style={{
+                    width: `${profile.vip_level >= 2 ? 100 : vip2BetProgress}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[10px] text-emerald-300 text-right font-mono-num">
+                {profile.vip_level >= 2
+                  ? 'Max VIP Level Active ⭐'
+                  : `Need ₱${Math.max(0, 10000 - profile.total_bet).toLocaleString()} more in total bets to reach VIP 2`}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Navigation Tabs inside Player Dashboard */}
         <div className="mt-5 flex items-center gap-1.5 overflow-x-auto border-t border-emerald-800/70 pt-4">
           {[
@@ -346,6 +439,81 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left 8 Columns: 7 Games & Milestone Tables */}
           <div className="lg:col-span-8 space-y-6">
+            {/* Daily Login Rewards & 7-Day Progress Calendar */}
+            <section className="rounded-3xl border border-amber-400/60 bg-gradient-to-r from-[#03241b] via-[#052920] to-[#03241b] p-5 shadow-2xl relative overflow-hidden">
+              <div className="absolute -top-10 -right-10 w-40 h-40 bg-amber-400/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-400 text-emerald-950 shadow-[0_0_20px_rgba(251,191,36,0.6)]">
+                    <Gift className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="font-display text-base sm:text-lg font-extrabold text-white">
+                      Daily Login Rewards & Streak
+                    </h2>
+                    <p className="text-xs text-amber-300 font-semibold">
+                      🔥 Current Streak: <strong className="font-mono-num text-white">{profile.daily_streak || claimedDaysList.length} Days</strong> · Claim bonus coins daily!
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 7-Day Calendar Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+                {[
+                  { day: 1, reward: 5 },
+                  { day: 2, reward: 10 },
+                  { day: 3, reward: 20 },
+                  { day: 4, reward: 35 },
+                  { day: 5, reward: 50 },
+                  { day: 6, reward: 75 },
+                  { day: 7, reward: 150 },
+                ].map((item) => {
+                  const isClaimed = claimedDaysList.includes(item.day);
+                  const prevClaimed = item.day === 1 || claimedDaysList.includes(item.day - 1);
+                  const isAvailable = !isClaimed && prevClaimed;
+
+                  return (
+                    <div
+                      key={item.day}
+                      className={`relative flex flex-col items-center justify-between rounded-2xl border p-2.5 text-center transition-all ${
+                        isClaimed
+                          ? 'border-emerald-600/80 bg-emerald-950/70 opacity-85'
+                          : isAvailable
+                            ? 'border-amber-400 bg-[#07382b] shadow-[0_0_18px_rgba(251,191,36,0.4)] ring-2 ring-amber-400/50'
+                            : 'border-emerald-900/80 bg-[#021812]/80 opacity-60'
+                      }`}
+                    >
+                      <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-300">
+                        Day {item.day}
+                      </span>
+                      <div className="my-1.5 flex h-8 w-8 items-center justify-center rounded-xl bg-amber-400/20 text-amber-200 font-mono-num font-black text-xs">
+                        ₱{item.reward}
+                      </div>
+                      {isClaimed ? (
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-900/90 px-2 py-1 text-[10px] font-bold text-emerald-200">
+                          <Check className="h-3 w-3" /> Claimed
+                        </span>
+                      ) : isAvailable ? (
+                        <button
+                          type="button"
+                          disabled={claimingDay === item.day}
+                          onClick={() => handleClaimDaily(item.day)}
+                          className="w-full rounded-xl bg-amber-400 py-1.5 text-[11px] font-black text-emerald-950 hover:bg-amber-300 transition shadow cursor-pointer active:scale-95 disabled:opacity-50"
+                        >
+                          {claimingDay === item.day ? 'Claiming...' : 'Claim 🎁'}
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-emerald-400/70">
+                          🔒 Locked
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
             {/* All Games Picture Grid — Tap Any Game to Choose Mode & Bet Inside */}
             <section className="rounded-3xl border border-emerald-800/80 bg-[#052920] p-5">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -891,13 +1059,36 @@ export const PlayerDashboard: React.FC<PlayerDashboardProps> = ({
       {/* ==================== TAB 3: WALLET, BONUSES, REFERRAL & PIN ==================== */}
       {activeTab === 'wallet' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-7 rounded-3xl border border-emerald-800/80 bg-[#052920] p-5 sm:p-6">
-            <h2 className="font-display text-lg font-bold text-white mb-4">Transaction History</h2>
-            {transactions.length === 0 ? (
-              <p className="text-sm text-emerald-300">No transactions yet.</p>
+          <div className="lg:col-span-7 rounded-3xl border border-emerald-800/80 bg-[#052920] p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="font-display text-lg font-bold text-white">Transaction History</h2>
+              <div className="flex items-center gap-1 bg-[#031c16] rounded-xl p-1 border border-emerald-800/80">
+                {[
+                  { id: 'cash_in' as const, label: `Cash-In (${cashInTxs.length})` },
+                  { id: 'cash_out' as const, label: `Cash-Out (${cashOutTxs.length})` },
+                  { id: 'other' as const, label: `Other (${otherTxs.length})` },
+                ].map((sub) => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => setTxSubTab(sub.id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                      txSubTab === sub.id
+                        ? 'bg-amber-400 text-emerald-950'
+                        : 'text-emerald-200 hover:text-white'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {activeTxs.length === 0 ? (
+              <p className="text-sm text-emerald-300 py-4 text-center">No transactions in this category.</p>
             ) : (
-              <div className="divide-y divide-emerald-800/60">
-                {transactions.map((tx) => (
+              <div className="divide-y divide-emerald-800/60 max-h-[380px] overflow-y-auto pr-1">
+                {activeTxs.map((tx) => (
                   <div key={tx.id} className="py-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-white capitalize">

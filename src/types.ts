@@ -268,6 +268,9 @@ export interface UserProfile {
   last_cashout_date: string | null;
   last_lat: number | null;
   last_lng: number | null;
+  daily_streak: number;
+  last_checkin_date: string | null;
+  checkin_claimed_days: string;
   bot_win_rate: number;
   created_at: string;
 }

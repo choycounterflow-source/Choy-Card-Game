@@ -477,6 +477,71 @@ app.post('/api/player/update-location', (req, res) => {
   res.json({ ok: true, lat, lng });
 });
 
+app.post('/api/player/daily-checkin', (req, res) => {
+  const { userId, dayNumber } = req.body || {};
+  const profile = getProfileById(String(userId || ''));
+  if (!profile) return res.status(404).json({ error: 'User not found' });
+
+  const dayNum = Number(dayNumber);
+  if (!Number.isFinite(dayNum) || dayNum < 1 || dayNum > 7) {
+    return res.status(400).json({ error: 'Invalid day number (1-7).' });
+  }
+
+  const rewards: Record<number, number> = {
+    1: 5,
+    2: 10,
+    3: 20,
+    4: 35,
+    5: 50,
+    6: 75,
+    7: 150,
+  };
+  const rewardAmt = rewards[dayNum] || 5;
+
+  let claimedDays: number[] = [];
+  try {
+    claimedDays = JSON.parse(profile.checkin_claimed_days || '[]');
+  } catch {
+    claimedDays = [];
+  }
+
+  if (claimedDays.includes(dayNum)) {
+    return res.status(400).json({ error: `Day ${dayNum} reward has already been claimed.` });
+  }
+
+  claimedDays.push(dayNum);
+  const nextStreak = Math.max(profile.daily_streak || 0, dayNum);
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  db.prepare(`
+    UPDATE profiles
+    SET wallet_balance = ROUND(wallet_balance + ?, 2),
+        daily_streak = ?,
+        last_checkin_date = ?,
+        checkin_claimed_days = ?
+    WHERE id = ?
+  `).run(rewardAmt, nextStreak, todayStr, JSON.stringify(claimedDays), profile.id);
+
+  db.prepare(`
+    INSERT INTO transactions (id, user_id, type, payment_method, sender_details, receiver_details, reference_no, amount, status)
+    VALUES (?, ?, 'bonus', 'Daily Check-in Reward', 'Choy Card Game', ?, ?, ?, 'completed')
+  `).run(createId('tx'), profile.id, profile.full_name, `CHECKIN-D${dayNum}-${Date.now().toString().slice(-5)}`, rewardAmt);
+
+  addNotification(
+    profile.id,
+    `Daily Reward Claimed (Day ${dayNum})!`,
+    `Congratulations! You claimed your Day ${dayNum} login bonus of ₱${rewardAmt}.`
+  );
+
+  const updated = getProfileById(profile.id);
+  if (updated) {
+    broadcastToUser(profile.id, 'wallet:update', { wallet_balance: updated.wallet_balance });
+    broadcastToUser(profile.id, 'notification:new', { title: 'Daily Reward Claimed' });
+  }
+
+  res.json({ ok: true, reward: rewardAmt, profile: updated });
+});
+
 app.post('/api/player/update-pin', (req, res) => {
   const { userId, currentPin, newPin } = req.body || {};
   const profile = getProfileById(String(userId || ''));

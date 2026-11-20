@@ -723,6 +723,25 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
     );
   };
 
+  const handleSortHand = () => {
+    playCardSelect();
+    setHand((prev) =>
+      [...prev].sort((a, b) => {
+        if (a.isJoker) return 1;
+        if (b.isJoker) return -1;
+        if (a.suit !== b.suit) return a.suit.localeCompare(b.suit);
+        return a.value - b.value;
+      })
+    );
+    setStatusBanner('Hand sorted by suit and rank!');
+  };
+
+  const handleUngroupHand = () => {
+    playCardSelect();
+    setHand((prev) => prev.map((c) => ({ ...c, meldGroup: undefined })));
+    setStatusBanner('All card groups cleared (Ungrouped).');
+  };
+
   // Drop Card to Switch (Balis-balis / Swap 2 selected cards smoothly in the 3-row layout)
   const handleDropToSwitch = () => {
     if (selectedIds.length !== 2) {
@@ -1741,18 +1760,23 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                       >
                         {topDiscard ? (
                           isTopDiscardVisibleToMe ? (
-                            <div
-                              className={`rounded-2xl p-0.5 transition-all ${
-                                hasDrawnThisTurn && selectedIds.length === 1
-                                  ? 'ring-2 ring-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.65)]'
-                                  : 'ring-2 ring-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.45)]'
-                              }`}
-                            >
-                              <PlayingCard
-                                card={topDiscard.card}
-                                layoutId={`card-${topDiscard.card.id}`}
-                                onClick={handleCenterDiscardTap}
-                              />
+                            <div className="relative flex flex-col items-center">
+                              <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-30 whitespace-nowrap rounded-lg bg-amber-400 px-2 py-0.5 text-[10px] font-black text-emerald-950 shadow-lg animate-pulse border border-white">
+                                🎯 THROWN TO YOU BY {topDiscard.thrownByName.toUpperCase()}
+                              </div>
+                              <div
+                                className={`rounded-2xl p-0.5 transition-all ${
+                                  hasDrawnThisTurn && selectedIds.length === 1
+                                    ? 'ring-2 ring-emerald-400 shadow-[0_0_28px_rgba(52,211,153,0.8)]'
+                                    : 'ring-2 ring-amber-400 shadow-[0_0_24px_rgba(251,191,36,0.65)]'
+                                }`}
+                              >
+                                <PlayingCard
+                                  card={topDiscard.card}
+                                  layoutId={`card-${topDiscard.card.id}`}
+                                  onClick={handleCenterDiscardTap}
+                                />
+                              </div>
                             </div>
                           ) : (
                             <div
@@ -2361,11 +2385,25 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                   </button>
                   <button
                     type="button"
+                    onClick={handleSortHand}
+                    className="inline-flex items-center gap-1 rounded-xl bg-amber-400 px-3 py-2 text-xs font-extrabold text-emerald-950 hover:bg-amber-300 cursor-pointer whitespace-nowrap shadow"
+                  >
+                    <span>Sort</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleGroupMelds}
                     className="inline-flex items-center gap-1 rounded-xl bg-emerald-400 px-3 py-2 text-xs font-extrabold text-emerald-950 hover:bg-emerald-300 cursor-pointer whitespace-nowrap"
                   >
                     <FolderKanban className="h-3.5 w-3.5" />
-                    Group Melds
+                    Group
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUngroupHand}
+                    className="inline-flex items-center gap-1 rounded-xl bg-teal-600 px-3 py-2 text-xs font-extrabold text-white hover:bg-teal-500 cursor-pointer whitespace-nowrap"
+                  >
+                    <span>Ungroup</span>
                   </button>
                   <button
                     type="button"

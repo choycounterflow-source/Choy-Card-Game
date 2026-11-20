@@ -390,4 +390,22 @@ export function playSlotCelebrationFanfare(tier: SlotCelebrationAudioTier): void
   });
 }
 
+export function playOdometerTick(): void {
+  const c = getAudioContext();
+  if (!c) return;
+  const now = c.currentTime;
+  const osc = c.createOscillator();
+  const gain = c.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(1400 + Math.random() * 300, now);
+  osc.frequency.exponentialRampToValueAtTime(800, now + 0.015);
+  gain.gain.setValueAtTime(0.08, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.018);
+  osc.connect(gain);
+  gain.connect(c.destination);
+  osc.start(now);
+  osc.stop(now + 0.02);
+}
+
+
 

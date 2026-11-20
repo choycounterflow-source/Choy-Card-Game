@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { LogOut, RotateCcw, Share2, Shield } from 'lucide-react';
+import { LogOut, RotateCcw, Share2, Shield, Volume2, VolumeX } from 'lucide-react';
+import { setAudioMuted } from './lib/audio';
 import {
   BET_TIERS,
   type ActiveTableSession,
@@ -41,6 +42,29 @@ export default function App() {
   const [view, setView] = useState<ActiveView>('login');
   const [user, setUser] = useState<UserProfile | null>(null);
   const [activeSlotKey, setActiveSlotKey] = useState<SlotGameKey>('superace');
+
+  // Global Sound Effects setting persisted in localStorage
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const saved = localStorage.getItem('choy_sound_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const [soundToast, setSoundToast] = useState<string | null>(null);
+
+  const handleToggleSound = () => {
+    setSoundEnabled((prev) => {
+      const next = !prev;
+      setSoundToast(next ? 'Sound Effects Enabled 🔊' : 'Sound Effects Muted 🔇');
+      setTimeout(() => setSoundToast(null), 2200);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setAudioMuted(!soundEnabled);
+    localStorage.setItem('choy_sound_enabled', String(soundEnabled));
+  }, [soundEnabled]);
 
   // Dashboard state
   const [games, setGames] = useState<GameSetting[]>([]);
@@ -520,6 +544,23 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={handleToggleSound}
+              title={soundEnabled ? 'Mute Sound Effects' : 'Enable Sound Effects'}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-bold transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer active:scale-95 ${
+                soundEnabled
+                  ? 'border-amber-400/80 bg-amber-400/20 text-amber-200 hover:bg-amber-400/35 shadow-[0_0_12px_rgba(251,191,36,0.35)]'
+                  : 'border-zinc-700 bg-zinc-900/85 text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {soundEnabled ? (
+                <Volume2 className="h-3.5 w-3.5 text-amber-300 animate-pulse" />
+              ) : (
+                <VolumeX className="h-3.5 w-3.5 text-zinc-400" />
+              )}
+              <span className="hidden sm:inline">{soundEnabled ? 'Sound: ON' : 'Sound: OFF'}</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setShareModalOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/70 bg-amber-400/15 px-3 py-2 text-xs font-extrabold text-amber-200 hover:bg-amber-400 hover:text-emerald-950 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
@@ -714,6 +755,13 @@ export default function App() {
             setCustomShareOrigin(nextCustom);
           }}
         />
+      )}
+
+      {/* Sound Toast Notification Popup */}
+      {soundToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-2xl border border-amber-400/80 bg-emerald-950/95 px-4 py-2 text-xs font-extrabold text-amber-200 shadow-[0_0_25px_rgba(251,191,36,0.6)] backdrop-blur-md animate-bounce">
+          <span>{soundToast}</span>
+        </div>
       )}
 
       {/* FLOATING ASK CHOY AI MESSENGER BUBBLE — Visible on Login, Dashboard, Admin, AI Studio */}

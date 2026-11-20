@@ -329,6 +329,10 @@ export const CashOutModal: React.FC<CashOutModalProps> = ({ user, onClose, onSub
           >
             {submitting ? 'Verifying PIN...' : 'Confirm Cash Out'}
           </button>
+
+          <p className="mt-2.5 text-center text-[11px] text-amber-300 font-medium leading-relaxed bg-[#031c16]/80 p-2.5 rounded-xl border border-amber-500/30">
+            Withdrawal is about to receive in 10-60 minutes. If you did not receive within the given time, contact us.
+          </p>
         </form>
       </div>
     </div>

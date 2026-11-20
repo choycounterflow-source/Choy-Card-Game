@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Crown, Sparkles, Star, Trophy } from 'lucide-react';
 import type { SlotCelebrationAudioTier } from '../lib/audio';
+import { playOdometerTick } from '../lib/audio';
 
 export type SlotWinTier = 'big' | 'super' | 'excellent';
 
@@ -183,14 +184,17 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
     payload.tier ?? (payload.kind === 'scatter' ? 'scatter' : 'bonus');
 
   const [displayAmount, setDisplayAmount] = useState<number>(0);
+  const [isCompleted, setIsCompleted] = useState<boolean>(false);
 
   // Smooth requestAnimationFrame counting-up peso odometer
   useEffect(() => {
     const target = payload.amount ?? 0;
     if (target <= 0) {
       setDisplayAmount(0);
+      setIsCompleted(true);
       return;
     }
+    setIsCompleted(false);
 
     const baseDuration =
       visualMode === 'excellent'
@@ -206,17 +210,33 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
       const progress = Math.min(1, (now - startTs) / durationMs);
       // Cubic ease-out so numbers race up fast then land crisply
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplayAmount(Number((target * eased).toFixed(2)));
+      const currentVal = target * eased;
+      setDisplayAmount(Number(currentVal.toFixed(2)));
+
       if (progress < 1) {
+        if (Math.floor(currentVal * 5) % 3 === 0) {
+          playOdometerTick();
+        }
         rafId = requestAnimationFrame(tick);
       } else {
         setDisplayAmount(target);
+        setIsCompleted(true);
       }
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [payload.amount, visualMode, turboMode]);
+
+  const handleAction = () => {
+    const target = payload.amount ?? 0;
+    if (!isCompleted) {
+      setDisplayAmount(target);
+      setIsCompleted(true);
+    } else {
+      onDismiss();
+    }
+  };
 
   const balloons = useMemo(() => {
     const count =
@@ -308,12 +328,12 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
     <motion.div
       role="button"
       tabIndex={0}
-      aria-label={`${payload.title} celebration. Tap anywhere to continue.`}
-      onClick={onDismiss}
+      aria-label={`${payload.title} celebration. Tap anywhere or skip to complete.`}
+      onClick={handleAction}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onDismiss();
+          handleAction();
         }
       }}
       initial={{ opacity: 0 }}
@@ -555,9 +575,27 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
           </motion.div>
         )}
 
-        <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-amber-200/75">
-          Tap anywhere to continue
-        </p>
+        {!isCompleted ? (
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-200/75">
+              Counting up...
+            </p>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAction();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-400/80 bg-amber-400/25 px-3 py-1.5 text-xs font-extrabold text-yellow-100 shadow hover:bg-amber-400/40 transition cursor-pointer active:scale-95"
+            >
+              <span>Skip ⏭</span>
+            </button>
+          </div>
+        ) : (
+          <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-amber-200/75 animate-pulse">
+            Tap anywhere to continue
+          </p>
+        )}
       </motion.div>
     </motion.div>
   );
