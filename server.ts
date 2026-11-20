@@ -7,7 +7,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import {
   addNotification,
   createId,
@@ -45,7 +45,7 @@ import {
   SUPER_ACE_BETS,
   VIP_RULES,
 } from './src/types.ts';
-import { runSuperAceSpin } from './server/superAceEngine.ts';
+import { BUY_SPIN_COST_MULTIPLIER, runSuperAceBuySpin, runSuperAceSpin } from './server/superAceEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1009,8 +1009,9 @@ function getOrCreateSlotState(userId: string, gameKey: SlotGameKey): SuperAcePla
     db.prepare(`
       INSERT INTO slot_game_states (
         user_id, game_key, total_regular_spins, scatters_triggered, spins_since_last_scatter,
-        free_spins_remaining, free_spins_total, free_spin_bet, free_spin_total_win
-      ) VALUES (?, ?, 0, 0, 0, 0, 0, 1, 0)
+        free_spins_remaining, free_spins_total, free_spin_bet, free_spin_total_win,
+        buy_bonus_target_win, buy_bonus_rate_pct
+      ) VALUES (?, ?, 0, 0, 0, 0, 0, 1, 0, 0, 0)
     `).run(userId, gameKey);
     return {
       totalRegularSpins: 0,
@@ -1020,6 +1021,8 @@ function getOrCreateSlotState(userId: string, gameKey: SlotGameKey): SuperAcePla
       freeSpinsTotal: 0,
       freeSpinBet: 1,
       freeSpinTotalWin: 0,
+      buyBonusTargetWin: 0,
+      buyBonusRatePct: 0,
     };
   }
 
@@ -1027,10 +1030,12 @@ function getOrCreateSlotState(userId: string, gameKey: SlotGameKey): SuperAcePla
     totalRegularSpins: Number(row.total_regular_spins || 0),
     scattersTriggered: Number(row.scatters_triggered || 0),
     spinsSinceLastScatter: Number(row.spins_since_last_scatter || 0),
-    freeSpinsRemaining: 0,
-    freeSpinsTotal: 0,
+    freeSpinsRemaining: Number(row.free_spins_remaining || 0),
+    freeSpinsTotal: Number(row.free_spins_total || 0),
     freeSpinBet: Number(row.free_spin_bet || 1),
-    freeSpinTotalWin: 0,
+    freeSpinTotalWin: Number(row.free_spin_total_win || 0),
+    buyBonusTargetWin: Number(row.buy_bonus_target_win || 0),
+    buyBonusRatePct: Number(row.buy_bonus_rate_pct || 0),
   };
 }
 
@@ -1054,6 +1059,139 @@ app.get('/api/slots/:gameKey/state', (req, res) => {
   });
 });
 
+app.post('/api/slots/:gameKey/buy-spin', (req, res) => {
+  const slotKey = resolveSlotKey(String(req.params.gameKey || ''));
+  if (!slotKey) return res.status(404).json({ error: 'Slot game not found.' });
+
+  const slotMeta = SLOT_GAME_CATALOG[slotKey];
+  const { userId, betAmount } = req.body || {};
+  const profile = getProfileById(String(userId || ''));
+  if (!profile) return res.status(404).json({ error: 'Player not found.' });
+
+  const games = getGameSettings();
+  const gameRow = games.find((g) => g.game_key === slotKey);
+  if (gameRow && !gameRow.is_enabled && profile.role !== 'admin') {
+    return res.status(403).json({
+      error: `${slotMeta.title} is Coming Soon! Stay tuned for launch.`,
+    });
+  }
+
+  const state = getOrCreateSlotState(profile.id, slotKey);
+  if (state.freeSpinsRemaining > 0) {
+    return res.status(400).json({
+      error: `Finish your ${state.freeSpinsRemaining} active Free Scatter Spins first before buying another bonus.`,
+    });
+  }
+
+  const requestedBet = Number(betAmount);
+  if (!SUPER_ACE_BETS.includes(requestedBet as (typeof SUPER_ACE_BETS)[number])) {
+    return res.status(400).json({
+      error: `Invalid bet amount. Choose from: ${SUPER_ACE_BETS.join(', ')}`,
+    });
+  }
+
+  const buyCost = Number((requestedBet * BUY_SPIN_COST_MULTIPLIER).toFixed(2));
+  if (profile.wallet_balance < buyCost) {
+    return res.status(400).json({
+      error: `Insufficient wallet balance for Buy Free Spin Scatter (₱${buyCost.toFixed(2)} for ₱${requestedBet} bet).`,
+    });
+  }
+
+  const preSpinWallet = profile.wallet_balance;
+  const buyResult = runSuperAceBuySpin({
+    betAmount: requestedBet,
+    preSpinWallet,
+    state,
+  });
+
+  const netDelta = Number((-buyCost).toFixed(2));
+  const nextWallet = Math.max(0, Number((preSpinWallet - buyCost).toFixed(2)));
+  const vipCfg = profile.vip_level >= 2 ? VIP_RULES[2] : VIP_RULES[1];
+  const cashbackEarned = Number((buyCost * vipCfg.cashbackRate).toFixed(4));
+
+  db.prepare(`
+    UPDATE slot_game_states
+    SET total_regular_spins = ?,
+        scatters_triggered = ?,
+        spins_since_last_scatter = ?,
+        free_spins_remaining = ?,
+        free_spins_total = ?,
+        free_spin_bet = ?,
+        free_spin_total_win = ?,
+        buy_bonus_target_win = ?,
+        buy_bonus_rate_pct = ?,
+        updated_at = datetime('now')
+    WHERE user_id = ? AND game_key = ?
+  `).run(
+    buyResult.nextState.totalRegularSpins,
+    buyResult.nextState.scattersTriggered,
+    buyResult.nextState.spinsSinceLastScatter,
+    buyResult.nextState.freeSpinsRemaining,
+    buyResult.nextState.freeSpinsTotal,
+    buyResult.nextState.freeSpinBet,
+    buyResult.nextState.freeSpinTotalWin,
+    Number(buyResult.nextState.buyBonusTargetWin || 0),
+    Number(buyResult.nextState.buyBonusRatePct || 0),
+    profile.id,
+    slotKey
+  );
+
+  db.prepare(`
+    UPDATE profiles
+    SET wallet_balance = ?,
+        total_bet = ROUND(total_bet + ?, 2),
+        pending_cashback = ROUND(pending_cashback + ?, 4)
+    WHERE id = ?
+  `).run(nextWallet, buyCost, cashbackEarned, profile.id);
+
+  recalculateVipLevel(profile.id);
+
+  db.prepare(`
+    INSERT INTO transactions (id, user_id, type, payment_method, sender_details, receiver_details, reference_no, amount, status)
+    VALUES (?, ?, 'loss', ?, ?, ?, ?, ?, 'completed')
+  `).run(
+    createId('tx'),
+    profile.id,
+    slotKey,
+    `${slotMeta.title} Buy Free Spin Scatter (Bet ₱${requestedBet} × 100)`,
+    profile.full_name,
+    `BS-${Date.now().toString().slice(-6)}`,
+    buyCost
+  );
+
+  db.prepare(`
+    UPDATE game_tables
+    SET hands_played = hands_played + 1,
+        total_pot_volume = ROUND(total_pot_volume + ?, 2)
+    WHERE id = ?
+  `).run(buyCost, `tbl-${slotKey}-slot`);
+
+  const freshProfile = getProfileById(profile.id)!;
+  broadcastToUser(profile.id, 'wallet:update', { wallet_balance: freshProfile.wallet_balance });
+
+  res.json({
+    gameKey: slotKey,
+    initialGrid: buyResult.initialGrid,
+    cascades: buyResult.cascades,
+    finalGrid: buyResult.finalGrid,
+    betAmount: requestedBet,
+    wasFreeSpin: false,
+    wasBuySpin: true,
+    buyCost,
+    buyBonusRatePct: buyResult.buyBonusRatePct,
+    scatterCount: buyResult.scatterCount,
+    scatterPositions: buyResult.scatterPositions,
+    triggeredFreeSpins: buyResult.triggeredFreeSpins,
+    totalWin: 0,
+    netDelta,
+    cashbackEarned,
+    highBetBoostActive: false,
+    betWalletRatio: buyResult.betWalletRatio,
+    state: buyResult.nextState,
+    profile: freshProfile,
+  });
+});
+
 app.post('/api/slots/:gameKey/spin', (req, res) => {
   const slotKey = resolveSlotKey(String(req.params.gameKey || ''));
   if (!slotKey) return res.status(404).json({ error: 'Slot game not found.' });
@@ -1072,19 +1210,19 @@ app.post('/api/slots/:gameKey/spin', (req, res) => {
   }
 
   const state = getOrCreateSlotState(profile.id, slotKey);
-  const isFreeSpin = false;
+  const isFreeSpin = state.freeSpinsRemaining > 0;
   const requestedBet = Number(betAmount);
 
-  if (!SUPER_ACE_BETS.includes(requestedBet as (typeof SUPER_ACE_BETS)[number])) {
+  if (!isFreeSpin && !SUPER_ACE_BETS.includes(requestedBet as (typeof SUPER_ACE_BETS)[number])) {
     return res.status(400).json({
       error: `Invalid bet amount. Choose from: ${SUPER_ACE_BETS.join(', ')}`,
     });
   }
 
-  const effectiveBet = requestedBet;
-  const spinCost = effectiveBet;
+  const effectiveBet = isFreeSpin ? state.freeSpinBet : requestedBet;
+  const spinCost = isFreeSpin ? 0 : effectiveBet;
 
-  if (profile.wallet_balance < spinCost) {
+  if (!isFreeSpin && profile.wallet_balance < spinCost) {
     return res.status(400).json({
       error: `Insufficient wallet balance for ₱${effectiveBet} spin. Ask Admin to add coins or lower your bet.`,
     });
@@ -1117,6 +1255,8 @@ app.post('/api/slots/:gameKey/spin', (req, res) => {
         free_spins_total = ?,
         free_spin_bet = ?,
         free_spin_total_win = ?,
+        buy_bonus_target_win = ?,
+        buy_bonus_rate_pct = ?,
         updated_at = datetime('now')
     WHERE user_id = ? AND game_key = ?
   `).run(
@@ -1127,6 +1267,8 @@ app.post('/api/slots/:gameKey/spin', (req, res) => {
     spinResult.nextState.freeSpinsTotal,
     spinResult.nextState.freeSpinBet,
     spinResult.nextState.freeSpinTotalWin,
+    Number(spinResult.nextState.buyBonusTargetWin || 0),
+    Number(spinResult.nextState.buyBonusRatePct || 0),
     profile.id,
     slotKey
   );
@@ -1172,7 +1314,7 @@ app.post('/api/slots/:gameKey/spin', (req, res) => {
       createId('tx'),
       profile.id,
       slotKey,
-      `${slotMeta.title} ${isFreeSpin ? 'Free Spin' : `Bet ₱${effectiveBet}`} (${spinResult.cascades.length} cascade${spinResult.cascades.length === 1 ? '' : 's'})`,
+      `${slotMeta.title} ${isFreeSpin ? 'Free Scatter Spin' : `Bet ₱${effectiveBet}`} (${spinResult.cascades.length} cascade${spinResult.cascades.length === 1 ? '' : 's'})`,
       profile.full_name,
       `SL-${Date.now().toString().slice(-6)}`,
       spinResult.totalWin
@@ -1895,6 +2037,191 @@ app.get('/api/admin/export-sql', (req, res) => {
   res.send(sqlLines.join('\n'));
 });
 
+// ==================== SHARED GEMINI HELPERS (FAST TIMEOUT + ROLE SANITIZER + RETRY) ====================
+
+function createGeminiClient(): GoogleGenAI {
+  return new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+interface SanitizedTurn {
+  role: 'user' | 'model';
+  parts: Array<{ text: string }>;
+}
+
+/**
+ * Normalizes chat history for Gemini API:
+ * - Strips empty turns
+ * - Drops leading 'model' messages (Gemini requires first turn to be 'user')
+ * - Merges consecutive same-role turns so roles strictly alternate user/model
+ * - Appends current user message
+ */
+function sanitizeGeminiContents(
+  history: unknown,
+  currentUserMessage: string,
+  maxTurns = 12
+): SanitizedTurn[] {
+  const cleaned: SanitizedTurn[] = [];
+  if (Array.isArray(history)) {
+    for (const raw of history.slice(-maxTurns)) {
+      const item = raw as { role?: string; text?: string };
+      const text = String(item?.text || '').trim();
+      if (!text) continue;
+      const role: 'user' | 'model' = item?.role === 'model' ? 'model' : 'user';
+      // Gemini requires conversation history to start with a user message
+      if (cleaned.length === 0 && role === 'model') continue;
+      const prev = cleaned[cleaned.length - 1];
+      if (prev && prev.role === role) {
+        prev.parts[0].text = `${prev.parts[0].text}\n${text}`;
+      } else {
+        cleaned.push({ role, parts: [{ text }] });
+      }
+    }
+  }
+
+  const trimmed = String(currentUserMessage || '').trim();
+  if (trimmed) {
+    const prev = cleaned[cleaned.length - 1];
+    if (prev && prev.role === 'user') {
+      prev.parts[0].text = `${prev.parts[0].text}\n${trimmed}`;
+    } else {
+      cleaned.push({ role: 'user', parts: [{ text: trimmed }] });
+    }
+  }
+  return cleaned;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+function formatGeminiError(err: unknown): { status: number; message: string } {
+  const raw = err instanceof Error ? err.message : String(err || 'Unknown AI error');
+  const lower = raw.toLowerCase();
+  if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || lower.includes('permission_denied') || lower.includes('403')) {
+    return {
+      status: 403,
+      message: 'Invalid or unauthorized GEMINI_API_KEY. Please check your GEMINI_API_KEY in Environment Variables and redeploy.',
+    };
+  }
+  if (lower.includes('resource_exhausted') || lower.includes('429') || lower.includes('quota')) {
+    return {
+      status: 429,
+      message: 'Gemini API rate limit or quota reached (429). Wait a few seconds and try again, or check your API key quota.',
+    };
+  }
+  if (lower.includes('timed out')) {
+    return {
+      status: 504,
+      message: raw,
+    };
+  }
+  return {
+    status: 502,
+    message: raw.length > 260 ? `${raw.slice(0, 260)}...` : raw,
+  };
+}
+
+async function generateTextWithFallback(options: {
+  contents: string | SanitizedTurn[];
+  systemInstruction: string;
+  preferredModel?: string;
+  timeoutMs?: number;
+}): Promise<{ text: string; modelUsed: string }> {
+  const ai = createGeminiClient();
+  const timeoutMs = options.timeoutMs ?? 20_000;
+  const envModel = String(process.env.GEMINI_MODEL || '').trim();
+  const candidates = Array.from(
+    new Set(
+      [
+        envModel || null,
+        options.preferredModel || 'gemini-4-hydrogen',
+        'gemini-3.1-flash-lite',
+        'gemini-2.5-flash',
+      ].filter((m): m is string => Boolean(m))
+    )
+  );
+
+  const deadline = Date.now() + timeoutMs;
+  let lastErr: unknown = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs < 2_500) break;
+    const perAttemptMs = i === candidates.length - 1 ? remainingMs : Math.min(13_000, remainingMs);
+    const model = candidates[i];
+    const isGemini4 = model.startsWith('gemini-4-');
+    try {
+      const config: {
+        systemInstruction: string;
+        thinkingConfig?: { thinkingLevel: ThinkingLevel };
+      } = {
+        systemInstruction: options.systemInstruction,
+      };
+      // Use ThinkingLevel.LOW on Gemini 4 models for fast interactive chat responses instead of slow HIGH thinking
+      if (isGemini4) {
+        config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      }
+
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model,
+          contents: options.contents,
+          config,
+        }),
+        perAttemptMs,
+        `AI Builder (${model})`
+      );
+
+      const text = (response.text || '').trim();
+      if (text) {
+        return { text, modelUsed: model };
+      }
+    } catch (err) {
+      lastErr = err;
+      const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      // Immediately stop retrying on invalid API key or permission errors
+      if (errMsg.includes('api_key_invalid') || errMsg.includes('api key not valid') || errMsg.includes('permission_denied')) {
+        throw err;
+      }
+      // Retry with next model candidate on 404/NOT_FOUND, 503/overloaded, 400 unsupported model, or timeout
+      const shouldFallback =
+        errMsg.includes('not_found') ||
+        errMsg.includes('404') ||
+        errMsg.includes('not found') ||
+        errMsg.includes('unsupported') ||
+        errMsg.includes('overloaded') ||
+        errMsg.includes('503') ||
+        errMsg.includes('timed out');
+      if (!shouldFallback || i === candidates.length - 1) {
+        throw err;
+      }
+      console.warn(`[Gemini] Model "${model}" unavailable/slow (${errMsg.slice(0, 120)}); retrying with fallback model...`);
+    }
+  }
+
+  throw lastErr || new Error('AI did not return a response. Please try again.');
+}
+
 // ==================== ASK CHOY AI (STRICTLY ADMIN KNOWLEDGE BOX) ====================
 
 app.post('/api/ask-choy', async (req, res) => {
@@ -1908,59 +2235,37 @@ app.post('/api/ask-choy', async (req, res) => {
 
   if (!process.env.GEMINI_API_KEY) {
     return res.status(503).json({
-      error: 'Ask Choy AI requires GEMINI_API_KEY in Settings > Secrets.',
+      error: 'Ask Choy AI requires GEMINI_API_KEY configured in Environment Variables.',
     });
   }
 
   try {
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+    const result = await generateTextWithFallback({
       contents: question,
-      config: {
-        systemInstruction: [
-          'You are "Ask Choy AI", the official floating messenger assistant of ChoyJiez Card Hub.',
-          'CRITICAL RULE: Your ONLY brain and source of truth is the Admin Knowledge Box below.',
-          'Do NOT invent rules, promos, prices, or facts outside of the Admin Knowledge Box.',
-          'Respond concisely (2-4 sentences max) in warm, helpful Bisaya/Tagalog/English matching the user language.',
-          'If the user asks something outside the Admin Knowledge Box, politely state that you can only answer based on Admin Choy’s official info and briefly share the closest relevant detail from the box.',
-          '',
-          '--- ADMIN KNOWLEDGE BOX START ---',
-          knowledgeBox,
-          '--- ADMIN KNOWLEDGE BOX END ---',
-        ].join('\n'),
-      },
+      preferredModel: 'gemini-4-hydrogen',
+      timeoutMs: 18_000,
+      systemInstruction: [
+        'You are "Ask Choy AI", the official floating messenger assistant of ChoyJiez Card Hub.',
+        'CRITICAL RULE: Your ONLY brain and source of truth is the Admin Knowledge Box below.',
+        'Do NOT invent rules, promos, prices, or facts outside of the Admin Knowledge Box.',
+        'Respond concisely (2-4 sentences max) in warm, helpful Bisaya/Tagalog/English matching the user language.',
+        'If the user asks something outside the Admin Knowledge Box, politely state that you can only answer based on Admin Choy’s official info and briefly share the closest relevant detail from the box.',
+        '',
+        '--- ADMIN KNOWLEDGE BOX START ---',
+        knowledgeBox,
+        '--- ADMIN KNOWLEDGE BOX END ---',
+      ].join('\n'),
     });
 
-    const reply = response.text?.trim() || knowledgeBox;
-    res.json({ reply });
+    res.json({ reply: result.text || knowledgeBox });
   } catch (err: unknown) {
     console.error('Ask Choy Gemini API error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to reach Ask Choy AI.';
-    res.status(502).json({ error: message });
+    const formatted = formatGeminiError(err);
+    res.status(formatted.status).json({ error: formatted.message });
   }
 });
 
 // ==================== GEMINI MULTI-TURN CHATBOT (FREE-TIER MODELS) ====================
-
-function createGeminiClient(): GoogleGenAI {
-  return new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-}
 
 const CHAT_PERSONAS: Record<string, string> = {
   coach:
@@ -1979,44 +2284,30 @@ app.post('/api/ai/chat', async (req, res) => {
   }
   if (!process.env.GEMINI_API_KEY) {
     return res.status(503).json({
-      error: 'Gemini AI requires GEMINI_API_KEY configured in Settings > Secrets.',
+      error: 'Gemini AI requires GEMINI_API_KEY configured in Environment Variables.',
     });
   }
 
-  // Allowlist verified standard-tier models
   const allowedModels = new Set(['gemini-4-hydrogen', 'gemini-3.1-flash-lite']);
   const selectedModel = allowedModels.has(String(model)) ? String(model) : 'gemini-4-hydrogen';
   const systemInstruction = CHAT_PERSONAS[String(persona)] || CHAT_PERSONAS.coach;
 
   try {
-    const ai = createGeminiClient();
-    const formattedHistory = Array.isArray(history)
-      ? history
-          .filter((m: { role?: string; text?: string }) => m && typeof m.text === 'string' && m.text.trim())
-          .slice(-20)
-          .map((m: { role: string; text: string }) => ({
-            role: m.role === 'model' ? 'model' : 'user',
-            parts: [{ text: m.text }],
-          }))
-      : [];
-
-    const chat = ai.chats.create({
-      model: selectedModel,
-      history: formattedHistory,
-      config: {
-        systemInstruction,
-      },
+    const contents = sanitizeGeminiContents(history, trimmed, 16);
+    const result = await generateTextWithFallback({
+      contents,
+      systemInstruction,
+      preferredModel: selectedModel,
+      timeoutMs: 20_000,
     });
-
-    const response = await chat.sendMessage({ message: trimmed });
     res.json({
-      reply: response.text?.trim() || 'I could not generate a response right now. Please try again.',
-      model: selectedModel,
+      reply: result.text || 'I could not generate a response right now. Please try again.',
+      model: result.modelUsed,
     });
   } catch (err: unknown) {
     console.error('Gemini chat error:', err);
-    const msg = err instanceof Error ? err.message : 'Failed to contact Gemini chatbot.';
-    res.status(502).json({ error: msg });
+    const formatted = formatGeminiError(err);
+    res.status(formatted.status).json({ error: formatted.message });
   }
 });
 
@@ -2336,6 +2627,145 @@ function buildSecretStudioAnalytics() {
   };
 }
 
+interface ParsedChoyRepoSuccess {
+  ok: true;
+  owner: string;
+  repo: string;
+  ownerRepo: string;
+  normalizedUrl: string;
+}
+
+interface ParsedChoyRepoError {
+  ok: false;
+  error: string;
+}
+
+function parseChoyGithubRepo(rawInput: string): ParsedChoyRepoSuccess | ParsedChoyRepoError {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) {
+    return { ok: false, error: 'GitHub repository URL is required.' };
+  }
+
+  let owner = '';
+  let repo = '';
+
+  const shorthandMatch = trimmed.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/);
+  if (shorthandMatch) {
+    owner = shorthandMatch[1];
+    repo = shorthandMatch[2];
+  } else {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(trimmed);
+    } catch {
+      return {
+        ok: false,
+        error: 'Enter a valid GitHub repository URL (e.g. https://github.com/yourname/choy-card-game).',
+      };
+    }
+    const host = parsedUrl.hostname.toLowerCase();
+    if (host !== 'github.com' && host !== 'www.github.com') {
+      return {
+        ok: false,
+        error: 'Only github.com repository URLs are allowed.',
+      };
+    }
+    const parts = parsedUrl.pathname
+      .replace(/^\/+|\/+$/g, '')
+      .split('/')
+      .filter(Boolean);
+    if (parts.length < 2) {
+      return {
+        ok: false,
+        error: 'GitHub URL must include owner and repo name (e.g. https://github.com/yourname/choy-card-game).',
+      };
+    }
+    owner = parts[0];
+    repo = parts[1].replace(/\.git$/i, '');
+  }
+
+  if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
+    return { ok: false, error: 'Invalid GitHub owner or repository name.' };
+  }
+
+  // Strictly lock GitHub Sync to the Choy Card Game repository only
+  if (!repo.toLowerCase().includes('choy')) {
+    return {
+      ok: false,
+      error:
+        'GitHub Sync is strictly restricted to the Choy Card Game repository only (repository name must contain "choy", e.g. choy-card-game).',
+    };
+  }
+
+  return {
+    ok: true,
+    owner,
+    repo,
+    ownerRepo: `${owner}/${repo}`,
+    normalizedUrl: `https://github.com/${owner}/${repo}`,
+  };
+}
+
+function getPendingCommitFiles(): Array<{ file_path: string; updated_at: string }> {
+  return db
+    .prepare(`SELECT file_path, updated_at FROM studio_pending_commits ORDER BY updated_at DESC`)
+    .all() as Array<{ file_path: string; updated_at: string }>;
+}
+
+async function githubApiRequest<T>(
+  endpoint: string,
+  options: { method?: string; token?: string; body?: unknown; timeoutMs?: number } = {}
+): Promise<{ ok: boolean; status: number; data: T | null; errorText: string }> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'ChoyCardGame-AdminStudio/1.0',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (options.token) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
+  try {
+    const res = await fetch(`https://api.github.com${endpoint}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+    const raw = await res.text();
+    let parsed: T | null = null;
+    try {
+      parsed = raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      parsed = null;
+    }
+    if (!res.ok) {
+      const msg =
+        (parsed && typeof parsed === 'object' && 'message' in parsed && typeof (parsed as { message?: unknown }).message === 'string'
+          ? (parsed as { message: string }).message
+          : '') ||
+        raw.slice(0, 180) ||
+        `GitHub API returned HTTP ${res.status}`;
+      return { ok: false, status: res.status, data: parsed, errorText: msg };
+    }
+    return { ok: true, status: res.status, data: parsed, errorText: '' };
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error && err.name === 'AbortError'
+        ? 'GitHub API request timed out.'
+        : err instanceof Error
+          ? err.message
+          : 'Unable to reach GitHub API.';
+    return { ok: false, status: 504, data: null, errorText: msg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 app.post('/api/admin/secret-studio/verify-pin', (req, res) => {
   if (!requireAdmin(req, res)) return;
   const pin = String(req.body?.pin || '').trim();
@@ -2346,12 +2776,17 @@ app.post('/api/admin/secret-studio/verify-pin', (req, res) => {
   res.json({
     unlocked: true,
     builderUrl: settings.builderUrl,
+    githubRepoUrl: settings.githubRepoUrl,
+    githubBranch: settings.githubBranch,
+    renderUrl: settings.renderUrl,
+    hasGithubToken: Boolean(process.env.GITHUB_TOKEN?.trim()),
+    hasRenderDeployHook: Boolean(process.env.RENDER_DEPLOY_HOOK_URL?.trim()),
   });
 });
 
 app.patch('/api/admin/secret-studio/settings', (req, res) => {
   if (!requireAdmin(req, res)) return;
-  const { currentPin, newPin, builderUrl } = req.body || {};
+  const { currentPin, newPin, builderUrl, githubRepoUrl, githubBranch, renderUrl } = req.body || {};
   const settings = getAdminSecretSettings();
 
   if (newPin !== undefined && String(newPin).trim() !== '') {
@@ -2364,24 +2799,64 @@ app.patch('/api/admin/secret-studio/settings', (req, res) => {
     }
   }
 
-  let cleanedUrl = settings.builderUrl;
+  let cleanedBuilderUrl = settings.builderUrl;
   if (builderUrl !== undefined) {
     const rawUrl = String(builderUrl || '').trim();
     if (rawUrl && !/^https?:\/\/.+/i.test(rawUrl)) {
       return res.status(400).json({ error: 'Builder URL must start with https:// or http://' });
     }
-    cleanedUrl = rawUrl;
+    cleanedBuilderUrl = rawUrl;
+  }
+
+  let cleanedGithubRepoUrl = settings.githubRepoUrl;
+  if (githubRepoUrl !== undefined) {
+    const rawGithub = String(githubRepoUrl || '').trim();
+    if (rawGithub) {
+      const parsedRepo = parseChoyGithubRepo(rawGithub);
+      if (parsedRepo.ok === false) {
+        return res.status(400).json({ error: parsedRepo.error });
+      }
+      cleanedGithubRepoUrl = parsedRepo.normalizedUrl;
+    } else {
+      cleanedGithubRepoUrl = '';
+    }
+  }
+
+  let cleanedGithubBranch = settings.githubBranch;
+  if (githubBranch !== undefined) {
+    const rawBranch = String(githubBranch || '').trim() || 'main';
+    if (!/^[A-Za-z0-9._/-]{1,80}$/.test(rawBranch)) {
+      return res.status(400).json({ error: 'Invalid Git branch name.' });
+    }
+    cleanedGithubBranch = rawBranch;
+  }
+
+  let cleanedRenderUrl = settings.renderUrl;
+  if (renderUrl !== undefined) {
+    const rawRender = String(renderUrl || '').trim();
+    if (rawRender && !/^https?:\/\/.+/i.test(rawRender)) {
+      return res.status(400).json({ error: 'Render project URL must start with https:// or http://' });
+    }
+    cleanedRenderUrl = rawRender;
   }
 
   const updated = updateAdminSecretSettings({
     secretPin: newPin && String(newPin).trim() ? String(newPin).trim() : undefined,
-    builderUrl: builderUrl !== undefined ? cleanedUrl : undefined,
+    builderUrl: builderUrl !== undefined ? cleanedBuilderUrl : undefined,
+    githubRepoUrl: githubRepoUrl !== undefined ? cleanedGithubRepoUrl : undefined,
+    githubBranch: githubBranch !== undefined ? cleanedGithubBranch : undefined,
+    renderUrl: renderUrl !== undefined ? cleanedRenderUrl : undefined,
   });
 
   res.json({
     ok: true,
     builderUrl: updated.builderUrl,
+    githubRepoUrl: updated.githubRepoUrl,
+    githubBranch: updated.githubBranch,
+    renderUrl: updated.renderUrl,
     pinChanged: Boolean(newPin && String(newPin).trim()),
+    hasGithubToken: Boolean(process.env.GITHUB_TOKEN?.trim()),
+    hasRenderDeployHook: Boolean(process.env.RENDER_DEPLOY_HOOK_URL?.trim()),
   });
 });
 
@@ -2407,10 +2882,481 @@ app.get('/api/admin/secret-studio/file', (req, res) => {
   });
 });
 
+app.put('/api/admin/secret-studio/file', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const relPath = String(req.body?.path || '');
+  const content = typeof req.body?.content === 'string' ? req.body.content : null;
+  if (content === null) {
+    return res.status(400).json({ error: 'Missing file content.' });
+  }
+  if (Buffer.byteLength(content, 'utf-8') > 400_000) {
+    return res.status(413).json({ error: 'File content exceeds 400KB safety limit.' });
+  }
+  const fullPath = resolveSafeProjectFile(relPath);
+  if (!fullPath) {
+    return res.status(404).json({ error: 'Source file not found or not editable.' });
+  }
+  const cleanPath = relPath.replace(/^\/+/, '');
+  try {
+    fs.writeFileSync(fullPath, content, 'utf-8');
+    db.prepare(
+      `INSERT INTO studio_pending_commits (file_path, updated_at)
+       VALUES (?, datetime('now'))
+       ON CONFLICT(file_path) DO UPDATE SET updated_at = datetime('now')`
+    ).run(cleanPath);
+    res.json({
+      ok: true,
+      path: cleanPath,
+      lines: content.split('\n').length,
+      size: Buffer.byteLength(content, 'utf-8'),
+      stagedForCommit: true,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to save file.';
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.get('/api/admin/secret-studio/deploy-status', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const settings = getAdminSecretSettings();
+  const githubToken = process.env.GITHUB_TOKEN?.trim() || '';
+  const hasRenderDeployHook = Boolean(process.env.RENDER_DEPLOY_HOOK_URL?.trim());
+  const pendingChanges = getPendingCommitFiles();
+
+  let githubOwnerRepo = '';
+  let recentCommits: Array<{
+    sha: string;
+    shortSha: string;
+    message: string;
+    author: string;
+    date: string;
+    url: string;
+  }> = [];
+  let commitsError = '';
+
+  if (settings.githubRepoUrl) {
+    const parsed = parseChoyGithubRepo(settings.githubRepoUrl);
+    if (parsed.ok) {
+      githubOwnerRepo = parsed.ownerRepo;
+      const commitsRes = await githubApiRequest<
+        Array<{
+          sha?: string;
+          html_url?: string;
+          commit?: {
+            message?: string;
+            author?: { name?: string; date?: string };
+          };
+          author?: { login?: string };
+        }>
+      >(
+        `/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/commits?sha=${encodeURIComponent(
+          settings.githubBranch || 'main'
+        )}&per_page=8`,
+        { token: githubToken || undefined, timeoutMs: 8_000 }
+      );
+      if (commitsRes.ok && Array.isArray(commitsRes.data)) {
+        recentCommits = commitsRes.data.map((c) => {
+          const fullSha = String(c.sha || '');
+          return {
+            sha: fullSha,
+            shortSha: fullSha.slice(0, 7),
+            message: String(c.commit?.message || '').split('\n')[0],
+            author: String(c.commit?.author?.name || c.author?.login || 'Admin'),
+            date: String(c.commit?.author?.date || ''),
+            url: String(c.html_url || `${parsed.normalizedUrl}/commit/${fullSha}`),
+          };
+        });
+      } else {
+        commitsError = commitsRes.errorText || 'Could not load recent GitHub commits.';
+      }
+    } else {
+      commitsError = parsed.error;
+    }
+  }
+
+  res.json({
+    githubRepoUrl: settings.githubRepoUrl,
+    githubBranch: settings.githubBranch,
+    githubOwnerRepo,
+    renderUrl: settings.renderUrl,
+    builderUrl: settings.builderUrl,
+    hasGithubToken: Boolean(githubToken),
+    hasRenderDeployHook,
+    pendingChanges,
+    recentCommits,
+    commitsError,
+  });
+});
+
+app.post('/api/admin/secret-studio/github/stage', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const action = String(req.body?.action || 'stage').trim().toLowerCase();
+  const rawPath = String(req.body?.filePath || '').replace(/^\/+/, '').trim();
+
+  if (action === 'clear') {
+    db.prepare(`DELETE FROM studio_pending_commits`).run();
+    return res.json({ ok: true, pendingChanges: [] });
+  }
+
+  if (!rawPath) {
+    return res.status(400).json({ error: 'filePath is required.' });
+  }
+
+  if (action === 'unstage') {
+    db.prepare(`DELETE FROM studio_pending_commits WHERE file_path = ?`).run(rawPath);
+    return res.json({ ok: true, pendingChanges: getPendingCommitFiles() });
+  }
+
+  const fullPath = resolveSafeProjectFile(rawPath);
+  if (!fullPath) {
+    return res.status(404).json({ error: 'File not found or not allowed to stage.' });
+  }
+  db.prepare(
+    `INSERT INTO studio_pending_commits (file_path, updated_at)
+     VALUES (?, datetime('now'))
+     ON CONFLICT(file_path) DO UPDATE SET updated_at = datetime('now')`
+  ).run(rawPath);
+  res.json({ ok: true, pendingChanges: getPendingCommitFiles() });
+});
+
+app.post('/api/admin/secret-studio/github/commit', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  const commitMessage = String(req.body?.message || '').trim();
+  const triggerRenderDeploy = Boolean(req.body?.triggerRenderDeploy);
+  const requestedFiles: string[] = Array.isArray(req.body?.files)
+    ? req.body.files.map((f: unknown) => String(f || '').replace(/^\/+/, '').trim()).filter(Boolean)
+    : [];
+
+  if (commitMessage.length < 2 || commitMessage.length > 200) {
+    return res.status(400).json({ error: 'Commit message must be between 2 and 200 characters.' });
+  }
+
+  const settings = getAdminSecretSettings();
+  const parsedRepo = parseChoyGithubRepo(settings.githubRepoUrl);
+  if (parsedRepo.ok === false) {
+    return res.status(400).json({
+      error:
+        'Set your Choy Card Game GitHub Repository link first before committing. ' + parsedRepo.error,
+    });
+  }
+
+  const githubToken = process.env.GITHUB_TOKEN?.trim() || '';
+  if (!githubToken) {
+    return res.status(503).json({
+      error:
+        'GITHUB_TOKEN is not configured on the server yet. Add GITHUB_TOKEN (GitHub Fine-grained PAT with Contents: Read & Write on your Choy Card Game repo) in Render -> Environment Variables, then redeploy.',
+    });
+  }
+
+  const fileList =
+    requestedFiles.length > 0
+      ? Array.from(new Set(requestedFiles))
+      : getPendingCommitFiles().map((p) => p.file_path);
+
+  if (fileList.length === 0) {
+    return res.status(400).json({
+      error: 'No staged files to commit. Edit a file in All Code or stage a file below first.',
+    });
+  }
+
+  if (fileList.length > 40) {
+    return res.status(400).json({ error: 'Maximum 40 files per single commit.' });
+  }
+
+  const resolvedFiles: Array<{ relPath: string; content: string }> = [];
+  for (const relPath of fileList) {
+    const fullPath = resolveSafeProjectFile(relPath);
+    if (!fullPath) {
+      return res.status(400).json({ error: `Invalid or inaccessible file path: ${relPath}` });
+    }
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    resolvedFiles.push({ relPath, content });
+  }
+
+  const { owner, repo, ownerRepo, normalizedUrl } = parsedRepo;
+  const branch = settings.githubBranch || 'main';
+  const repoBase = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+
+  // 1. Get current branch head ref
+  const refRes = await githubApiRequest<{ object?: { sha?: string } }>(
+    `${repoBase}/git/ref/heads/${encodeURIComponent(branch)}`,
+    { token: githubToken }
+  );
+  if (!refRes.ok || !refRes.data?.object?.sha) {
+    return res.status(refRes.status === 404 ? 404 : 502).json({
+      error: `Unable to read branch "${branch}" on ${ownerRepo}: ${refRes.errorText}`,
+    });
+  }
+  const headCommitSha = refRes.data.object.sha;
+
+  // 2. Get base tree SHA from head commit
+  const headCommitRes = await githubApiRequest<{ tree?: { sha?: string } }>(
+    `${repoBase}/git/commits/${headCommitSha}`,
+    { token: githubToken }
+  );
+  if (!headCommitRes.ok || !headCommitRes.data?.tree?.sha) {
+    return res.status(502).json({
+      error: `Unable to read head commit tree: ${headCommitRes.errorText}`,
+    });
+  }
+  const baseTreeSha = headCommitRes.data.tree.sha;
+
+  // 3. Create blobs for each file
+  const treeEntries: Array<{ path: string; mode: '100644'; type: 'blob'; sha: string }> = [];
+  for (const file of resolvedFiles) {
+    const blobRes = await githubApiRequest<{ sha?: string }>(`${repoBase}/git/blobs`, {
+      method: 'POST',
+      token: githubToken,
+      body: { content: file.content, encoding: 'utf-8' },
+    });
+    if (!blobRes.ok || !blobRes.data?.sha) {
+      return res.status(502).json({
+        error: `Failed creating GitHub blob for ${file.relPath}: ${blobRes.errorText}`,
+      });
+    }
+    treeEntries.push({
+      path: file.relPath,
+      mode: '100644',
+      type: 'blob',
+      sha: blobRes.data.sha,
+    });
+  }
+
+  // 4. Create new tree
+  const treeRes = await githubApiRequest<{ sha?: string }>(`${repoBase}/git/trees`, {
+    method: 'POST',
+    token: githubToken,
+    body: { base_tree: baseTreeSha, tree: treeEntries },
+  });
+  if (!treeRes.ok || !treeRes.data?.sha) {
+    return res.status(502).json({
+      error: `Failed creating GitHub tree: ${treeRes.errorText}`,
+    });
+  }
+
+  // 5. Create new commit
+  const newCommitRes = await githubApiRequest<{ sha?: string; html_url?: string }>(
+    `${repoBase}/git/commits`,
+    {
+      method: 'POST',
+      token: githubToken,
+      body: {
+        message: commitMessage,
+        tree: treeRes.data.sha,
+        parents: [headCommitSha],
+      },
+    }
+  );
+  if (!newCommitRes.ok || !newCommitRes.data?.sha) {
+    return res.status(502).json({
+      error: `Failed creating GitHub commit: ${newCommitRes.errorText}`,
+    });
+  }
+  const newCommitSha = newCommitRes.data.sha;
+
+  // 6. Fast-forward branch ref
+  const updateRefRes = await githubApiRequest(`${repoBase}/git/refs/heads/${encodeURIComponent(branch)}`, {
+    method: 'PATCH',
+    token: githubToken,
+    body: { sha: newCommitSha, force: false },
+  });
+  if (!updateRefRes.ok) {
+    return res.status(502).json({
+      error: `Failed updating branch "${branch}": ${updateRefRes.errorText}`,
+    });
+  }
+
+  // Clear committed paths from studio_pending_commits
+  const delStmt = db.prepare(`DELETE FROM studio_pending_commits WHERE file_path = ?`);
+  for (const file of resolvedFiles) {
+    delStmt.run(file.relPath);
+  }
+
+  let renderTriggered = false;
+  let renderDeployNote = '';
+  const hookUrl = process.env.RENDER_DEPLOY_HOOK_URL?.trim() || '';
+  if (triggerRenderDeploy && hookUrl && hookUrl.startsWith('https://api.render.com/deploy/')) {
+    try {
+      const hookRes = await fetch(hookUrl, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+      });
+      renderTriggered = hookRes.ok;
+      renderDeployNote = hookRes.ok
+        ? 'Render redeploy triggered automatically.'
+        : `Render deploy hook returned HTTP ${hookRes.status}.`;
+    } catch {
+      renderDeployNote = 'GitHub commit succeeded, but Render deploy hook request timed out.';
+    }
+  }
+
+  res.json({
+    ok: true,
+    repo: ownerRepo,
+    branch,
+    commitSha: newCommitSha,
+    shortSha: newCommitSha.slice(0, 7),
+    commitUrl: newCommitRes.data.html_url || `${normalizedUrl}/commit/${newCommitSha}`,
+    filesCommitted: resolvedFiles.map((f) => f.relPath),
+    renderTriggered,
+    renderDeployNote,
+    pendingChanges: getPendingCommitFiles(),
+  });
+});
+
+app.post('/api/admin/secret-studio/render/deploy', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const hookUrl = process.env.RENDER_DEPLOY_HOOK_URL?.trim() || '';
+  if (!hookUrl) {
+    return res.status(503).json({
+      error:
+        'RENDER_DEPLOY_HOOK_URL is not configured yet. In Render Dashboard -> Settings -> Deploy Hook, copy the URL and add it as RENDER_DEPLOY_HOOK_URL in Render Environment Variables.',
+    });
+  }
+  if (!hookUrl.startsWith('https://api.render.com/deploy/')) {
+    return res.status(400).json({
+      error: 'Configured RENDER_DEPLOY_HOOK_URL must be a valid https://api.render.com/deploy/... URL.',
+    });
+  }
+  try {
+    const deployRes = await fetch(hookUrl, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!deployRes.ok) {
+      return res.status(502).json({
+        error: `Render Deploy Hook returned HTTP ${deployRes.status}.`,
+      });
+    }
+    res.json({
+      ok: true,
+      triggeredAt: new Date().toISOString(),
+      message: 'Render deployment triggered! Check your Render project dashboard for live build logs.',
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to reach Render Deploy Hook.';
+    res.status(504).json({ error: msg });
+  }
+});
+
 app.get('/api/admin/secret-studio/analytics', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json(buildSecretStudioAnalytics());
 });
+
+function executeSecretStudioLiveActions(rawReply: string): {
+  cleanReply: string;
+  appliedUpdates: string[];
+} {
+  const appliedUpdates: string[] = [];
+  const actionRegex = /```live-action\s*([\s\S]*?)```/gi;
+
+  const cleanReply = rawReply
+    .replace(actionRegex, (_match, jsonBody: string) => {
+      try {
+        const parsed = JSON.parse(String(jsonBody || '').trim());
+        const actions = Array.isArray(parsed) ? parsed : [parsed];
+
+        for (const action of actions) {
+          if (!action || typeof action !== 'object') continue;
+          const type = String(action.type || '').trim();
+
+          if (type === 'update_weekly_prizes') {
+            const current = getSystemConfig();
+            const top1 = Number(action.top1 ?? current.weekly_top1_prize);
+            const top2 = Number(action.top2 ?? current.weekly_top2_prize);
+            const top3 = Number(action.top3 ?? current.weekly_top3_prize);
+            if (!Number.isNaN(top1) && !Number.isNaN(top2) && !Number.isNaN(top3) && top1 >= 0 && top2 >= 0 && top3 >= 0) {
+              db.prepare(
+                `UPDATE system_config SET weekly_top1_prize = ?, weekly_top2_prize = ?, weekly_top3_prize = ? WHERE id = 1`
+              ).run(top1, top2, top3);
+              const updated = getSystemConfig();
+              broadcastGlobal('config:updated', { systemConfig: updated });
+              appliedUpdates.push(`Updated Weekly Prizes: Top 1 ₱${top1}, Top 2 ₱${top2}, Top 3 ₱${top3}`);
+            }
+          } else if (type === 'update_ask_choy_knowledge') {
+            const knowledge = String(action.knowledge || '').trim();
+            if (knowledge) {
+              db.prepare(`UPDATE system_config SET ask_choy_knowledge = ? WHERE id = 1`).run(knowledge);
+              const updated = getSystemConfig();
+              broadcastGlobal('config:updated', { systemConfig: updated });
+              appliedUpdates.push('Updated Ask Choy AI Knowledge Box live');
+            }
+          } else if (type === 'toggle_game') {
+            const gameKey = String(action.game_key || '').trim();
+            const enabled = action.enabled ? 1 : 0;
+            const existing = db.prepare(`SELECT short_label FROM game_settings WHERE game_key = ?`).get(gameKey) as
+              | { short_label: string }
+              | undefined;
+            if (existing) {
+              db.prepare(`UPDATE game_settings SET is_enabled = ? WHERE game_key = ?`).run(enabled, gameKey);
+              broadcastGlobal('games:updated', {
+                games: getGameSettings(),
+                tables: getGameTables(getSeatCountMap()),
+              });
+              appliedUpdates.push(`${enabled ? 'Enabled' : 'Disabled'} game: ${existing.short_label}`);
+            }
+          } else if (type === 'adjust_player_coins') {
+            const query = String(action.query || '').trim().toLowerCase();
+            const delta = Number(action.amount ?? 0);
+            const note = String(action.note || 'Admin Builder Live Update').trim();
+            if (query && !Number.isNaN(delta) && delta !== 0) {
+              const all = getAllProfiles();
+              const target = all.find(
+                (p) =>
+                  p.id.toLowerCase() === query ||
+                  p.full_name.toLowerCase() === query ||
+                  p.full_name.toLowerCase().includes(query) ||
+                  (p.phone && p.phone.toLowerCase() === query)
+              );
+              if (target) {
+                const nextBal = Math.max(0, Number((target.wallet_balance + delta).toFixed(2)));
+                db.prepare(`UPDATE profiles SET wallet_balance = ? WHERE id = ?`).run(nextBal, target.id);
+                recalculateVipLevel(target.id);
+                addNotification(
+                  target.id,
+                  delta > 0 ? 'Coins Credited by Admin' : 'Wallet Adjusted by Admin',
+                  `${delta > 0 ? '+' : ''}₱${delta.toFixed(2)} (${note}). New balance: ₱${nextBal.toFixed(2)}.`
+                );
+                broadcastToUser(target.id, 'wallet:update', { wallet_balance: nextBal });
+                broadcastToUser(target.id, 'notification:new', { title: 'Wallet Updated' });
+                appliedUpdates.push(
+                  `Adjusted ${target.full_name}'s wallet by ${delta > 0 ? '+' : ''}₱${delta.toFixed(2)} (Now ₱${nextBal.toFixed(2)})`
+                );
+              }
+            }
+          } else if (type === 'broadcast_announcement') {
+            const title = String(action.title || 'Admin Announcement').trim();
+            const message = String(action.message || '').trim();
+            if (message) {
+              const recipients = getAllProfiles().filter((p) => p.role === 'player' || p.role === 'agent');
+              for (const user of recipients) {
+                addNotification(user.id, title, message);
+              }
+              broadcastGlobal('notification:new', { title, message });
+              appliedUpdates.push(`Broadcasted announcement "${title}" to ${recipients.length} users`);
+            }
+          } else if (type === 'update_public_url') {
+            const rawUrl = String(action.url || '').trim().replace(/\/+$/, '');
+            if (rawUrl && /^https?:\/\/.+/i.test(rawUrl)) {
+              db.prepare(`UPDATE system_config SET public_share_url = ? WHERE id = 1`).run(rawUrl);
+              const updated = getSystemConfig();
+              broadcastGlobal('config:updated', { systemConfig: updated });
+              appliedUpdates.push(`Updated Public Share URL to ${rawUrl}`);
+            }
+          }
+        }
+      } catch (actionErr) {
+        console.warn('Secret Studio live-action parse warning:', actionErr);
+      }
+      return '';
+    })
+    .trim();
+
+  return { cleanReply, appliedUpdates };
+}
 
 app.post('/api/admin/secret-studio/chat', async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -2421,24 +3367,32 @@ app.post('/api/admin/secret-studio/chat', async (req, res) => {
   }
   if (!process.env.GEMINI_API_KEY) {
     return res.status(503).json({
-      error: 'AI Builder chat requires GEMINI_API_KEY configured in environment secrets.',
+      error: 'AI Builder chat requires GEMINI_API_KEY configured in Environment Variables (e.g. Render Environment > GEMINI_API_KEY).',
     });
   }
 
   try {
     const analytics = buildSecretStudioAnalytics();
+    const sysConfig = getSystemConfig();
     const files = listProjectSourceFiles();
     const fileListSummary = files.map((f) => `${f.path} (${f.lines}L)`).join(', ');
-    const codeSnippet = activeFilePath && activeFileContent
-      ? `\n\n--- CURRENTLY OPEN CODE FILE: ${activeFilePath} ---\n${String(activeFileContent).slice(0, 12000)}\n--- END FILE ---`
-      : '';
+    const codeSnippet =
+      activeFilePath && activeFileContent
+        ? `\n\n--- CURRENTLY OPEN CODE FILE: ${activeFilePath} ---\n${String(activeFileContent).slice(0, 10000)}\n--- END FILE ---`
+        : '';
 
     const systemInstruction = [
-      'You are the Choy Card Game Senior Full-Stack App Builder & Live Data Analyst inside the Admin Secret Builder Studio.',
-      'Speak naturally in Bisaya, Tagalog, or English matching the Admin.',
-      'You have LIVE access to the app database analytics and full source file list below.',
-      'When the Admin asks for analytics, use the exact live numbers below.',
-      'When the Admin asks to edit or add a feature, provide exact code guidance AND a short ready-to-copy "Build Instruction" block they can paste if editing externally.',
+      'You are the Choy Card Game Senior Full-Stack App Builder & Live Operations Engine inside the Secret Admin Builder Studio.',
+      'Speak naturally, clearly, and concisely in Bisaya, Tagalog, or English matching the Admin.',
+      'You have LIVE read access to the app database analytics, current settings, and source files below.',
+      'You ALSO have LIVE WRITE capability! Whenever the Admin explicitly asks you to apply a live database/app update, include a ```live-action JSON block at the end of your reply using one of these exact schemas:',
+      '1) Update weekly prizes: ```live-action\n{"type":"update_weekly_prizes","top1":5000,"top2":2500,"top3":1000}\n```',
+      '2) Update Ask Choy AI brain: ```live-action\n{"type":"update_ask_choy_knowledge","knowledge":"..."}\n```',
+      '3) Enable/disable a game (game_key from list below): ```live-action\n{"type":"toggle_game","game_key":"tongits","enabled":true}\n```',
+      '4) Add/deduct coins for a player: ```live-action\n{"type":"adjust_player_coins","query":"player name","amount":500,"note":"bonus"}\n```',
+      '5) Broadcast announcement to all players & agents: ```live-action\n{"type":"broadcast_announcement","title":"...","message":"..."}\n```',
+      '6) Update Public Share URL: ```live-action\n{"type":"update_public_url","url":"https://..."}\n```',
+      'Only emit a ```live-action block when the Admin explicitly asks to apply that live change. For UI/code feature changes that require editing source files, provide exact guidance AND remind them they can edit files in the All Code tab or apply code changes in their main project editor.',
       '',
       `LIVE ANALYTICS SNAPSHOT (${analytics.generatedAt}):`,
       `- Online WebSocket Clients: ${analytics.onlineSockets}`,
@@ -2446,37 +3400,36 @@ app.post('/api/admin/secret-studio/chat', async (req, res) => {
       `- Wallet Circulation: ₱${analytics.totalWalletCirculation} | Cash-In: ₱${analytics.totalCashIn} | Cash-Out: ₱${analytics.totalCashOut} | Net Cashflow: ₱${analytics.netCashflow}`,
       `- Pending Requests: ${analytics.pendingTxCount} | Total Rake: ₱${analytics.totalRake} | Total Hands: ${analytics.totalHands} | Pot Volume: ₱${analytics.totalPotVolume}`,
       `- Slots: ${analytics.slotStats.totalSpins} total spins, ${analytics.slotStats.totalScatters} scatter hits`,
-      `- Database Tables: ${analytics.tableRowCounts.map((t) => `${t.table}=${t.rows}`).join(', ')}`,
+      `- Current Weekly Prizes: Top 1 ₱${sysConfig.weekly_top1_prize} | Top 2 ₱${sysConfig.weekly_top2_prize} | Top 3 ₱${sysConfig.weekly_top3_prize}`,
+      `- Games: ${analytics.gameBreakdown.map((g) => `${g.game_key}(${g.enabled ? 'ON' : 'OFF'}, hands=${g.handsPlayed}, rake=₱${g.rakeEarned})`).join(', ')}`,
+      `- Top Wallets: ${analytics.topWallets.map((w) => `${w.full_name}(${w.role}, ₱${w.wallet_balance})`).join(', ')}`,
       `- Project Files (${files.length}): ${fileListSummary}`,
       codeSnippet,
     ].join('\n');
 
-    const contents = [
-      ...(Array.isArray(history)
-        ? history.slice(-12).map((h: { role?: string; text?: string }) => ({
-            role: h.role === 'model' ? 'model' : 'user',
-            parts: [{ text: String(h.text || '') }],
-          }))
-        : []),
-      { role: 'user', parts: [{ text: trimmed }] },
-    ];
-
-    const ai = createGeminiClient();
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+    const contents = sanitizeGeminiContents(history, trimmed, 10);
+    const result = await generateTextWithFallback({
       contents,
-      config: {
-        systemInstruction,
-      },
+      systemInstruction,
+      preferredModel: 'gemini-4-hydrogen',
+      timeoutMs: 22_000,
     });
 
+    const { cleanReply, appliedUpdates } = executeSecretStudioLiveActions(result.text);
+
     res.json({
-      reply: response.text?.trim() || 'Ready! Tell me what code or analytics you want to inspect.',
+      reply:
+        cleanReply ||
+        (appliedUpdates.length > 0
+          ? `Live update applied successfully:\n• ${appliedUpdates.join('\n• ')}`
+          : 'Ready! Tell me what analytics, live update, or code you want to work on.'),
+      appliedUpdates,
+      modelUsed: result.modelUsed,
     });
   } catch (err: unknown) {
     console.error('Secret Studio AI chat error:', err);
-    const msg = err instanceof Error ? err.message : 'Failed to reach Builder AI.';
-    res.status(502).json({ error: msg });
+    const formatted = formatGeminiError(err);
+    res.status(formatted.status).json({ error: formatted.message });
   }
 });
 

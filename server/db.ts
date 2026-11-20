@@ -140,6 +140,8 @@ export function initDatabase(): void {
       free_spins_total INTEGER NOT NULL DEFAULT 0,
       free_spin_bet REAL NOT NULL DEFAULT 1,
       free_spin_total_win REAL NOT NULL DEFAULT 0,
+      buy_bonus_target_win REAL NOT NULL DEFAULT 0,
+      buy_bonus_rate_pct INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (user_id, game_key)
     );
@@ -156,12 +158,23 @@ export function initDatabase(): void {
       key TEXT PRIMARY KEY,
       applied_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS studio_pending_commits (
+      file_path TEXT PRIMARY KEY,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
-  // Safe migration for existing databases missing free_spins_total
+  // Safe migration for existing databases missing free_spins_total or buy bonus columns
   const slotCols = db.prepare(`PRAGMA table_info(slot_game_states)`).all() as Array<{ name: string }>;
   if (!slotCols.some((col) => col.name === 'free_spins_total')) {
     db.exec(`ALTER TABLE slot_game_states ADD COLUMN free_spins_total INTEGER NOT NULL DEFAULT 0;`);
+  }
+  if (!slotCols.some((col) => col.name === 'buy_bonus_target_win')) {
+    db.exec(`ALTER TABLE slot_game_states ADD COLUMN buy_bonus_target_win REAL NOT NULL DEFAULT 0;`);
+  }
+  if (!slotCols.some((col) => col.name === 'buy_bonus_rate_pct')) {
+    db.exec(`ALTER TABLE slot_game_states ADD COLUMN buy_bonus_rate_pct INTEGER NOT NULL DEFAULT 0;`);
   }
 
   // Safe migration for IP-based welcome scatter tracking on profiles
@@ -189,6 +202,15 @@ export function initDatabase(): void {
   }
   if (!sysCols.some((col) => col.name === 'admin_builder_url')) {
     db.exec(`ALTER TABLE system_config ADD COLUMN admin_builder_url TEXT NOT NULL DEFAULT '';`);
+  }
+  if (!sysCols.some((col) => col.name === 'admin_github_repo_url')) {
+    db.exec(`ALTER TABLE system_config ADD COLUMN admin_github_repo_url TEXT NOT NULL DEFAULT '';`);
+  }
+  if (!sysCols.some((col) => col.name === 'admin_github_branch')) {
+    db.exec(`ALTER TABLE system_config ADD COLUMN admin_github_branch TEXT NOT NULL DEFAULT 'main';`);
+  }
+  if (!sysCols.some((col) => col.name === 'admin_render_url')) {
+    db.exec(`ALTER TABLE system_config ADD COLUMN admin_render_url TEXT NOT NULL DEFAULT '';`);
   }
 
   seedInitialData();
@@ -637,27 +659,62 @@ export function getSystemConfig(): SystemConfig {
   };
 }
 
-export function getAdminSecretSettings(): { secretPin: string; builderUrl: string } {
+export interface AdminSecretSettings {
+  secretPin: string;
+  builderUrl: string;
+  githubRepoUrl: string;
+  githubBranch: string;
+  renderUrl: string;
+}
+
+export function getAdminSecretSettings(): AdminSecretSettings {
   const row = db
-    .prepare('SELECT admin_secret_pin, admin_builder_url FROM system_config WHERE id = 1')
-    .get() as { admin_secret_pin?: string; admin_builder_url?: string } | undefined;
+    .prepare(
+      'SELECT admin_secret_pin, admin_builder_url, admin_github_repo_url, admin_github_branch, admin_render_url FROM system_config WHERE id = 1'
+    )
+    .get() as
+    | {
+        admin_secret_pin?: string;
+        admin_builder_url?: string;
+        admin_github_repo_url?: string;
+        admin_github_branch?: string;
+        admin_render_url?: string;
+      }
+    | undefined;
   return {
     secretPin: String(row?.admin_secret_pin || '2026').trim() || '2026',
     builderUrl: String(row?.admin_builder_url || '').trim(),
+    githubRepoUrl: String(row?.admin_github_repo_url || '').trim(),
+    githubBranch: String(row?.admin_github_branch || 'main').trim() || 'main',
+    renderUrl: String(row?.admin_render_url || '').trim(),
   };
 }
 
-export function updateAdminSecretSettings(patch: {
-  secretPin?: string;
-  builderUrl?: string;
-}): { secretPin: string; builderUrl: string } {
+export function updateAdminSecretSettings(
+  patch: Partial<AdminSecretSettings>
+): AdminSecretSettings {
   const current = getAdminSecretSettings();
-  const nextPin = patch.secretPin !== undefined ? patch.secretPin.trim() : current.secretPin;
-  const nextUrl = patch.builderUrl !== undefined ? patch.builderUrl.trim() : current.builderUrl;
+  const next: AdminSecretSettings = {
+    secretPin: patch.secretPin !== undefined ? patch.secretPin.trim() : current.secretPin,
+    builderUrl: patch.builderUrl !== undefined ? patch.builderUrl.trim() : current.builderUrl,
+    githubRepoUrl:
+      patch.githubRepoUrl !== undefined ? patch.githubRepoUrl.trim() : current.githubRepoUrl,
+    githubBranch:
+      patch.githubBranch !== undefined
+        ? patch.githubBranch.trim() || 'main'
+        : current.githubBranch,
+    renderUrl: patch.renderUrl !== undefined ? patch.renderUrl.trim() : current.renderUrl,
+  };
   db.prepare(
-    'UPDATE system_config SET admin_secret_pin = ?, admin_builder_url = ? WHERE id = 1'
-  ).run(nextPin, nextUrl);
-  return { secretPin: nextPin, builderUrl: nextUrl };
+    `UPDATE system_config
+     SET admin_secret_pin = ?,
+         admin_builder_url = ?,
+         admin_github_repo_url = ?,
+         admin_github_branch = ?,
+         admin_render_url = ?
+     WHERE id = 1`
+  ).run(next.secretPin, next.builderUrl, next.githubRepoUrl, next.githubBranch, next.renderUrl);
+  return next;
 }
 
 export function getTransactionsForUser(userId: string): Transaction[] {

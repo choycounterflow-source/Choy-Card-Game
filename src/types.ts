@@ -201,6 +201,7 @@ export interface SuperAceCell {
 export interface SuperAceCascadeStep {
   stepIndex: number;
   multiplier: number;
+  wildMultiplier?: number;
   winningCells: Array<{ row: number; col: number }>;
   matchedSymbol: SuperAceSymbol;
   boxCount: number;
@@ -219,6 +220,8 @@ export interface SuperAcePlayerState {
   freeSpinsTotal: number;
   freeSpinBet: number;
   freeSpinTotalWin: number;
+  buyBonusTargetWin?: number;
+  buyBonusRatePct?: number;
 }
 
 export interface SuperAceSpinResult {
@@ -227,6 +230,9 @@ export interface SuperAceSpinResult {
   finalGrid: SuperAceCell[][];
   betAmount: number;
   wasFreeSpin: boolean;
+  wasBuySpin?: boolean;
+  buyCost?: number;
+  buyBonusRatePct?: number;
   scatterCount: number;
   scatterPositions: Array<{ row: number; col: number }>;
   triggeredFreeSpins: number;

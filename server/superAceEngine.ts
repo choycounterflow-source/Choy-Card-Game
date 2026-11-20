@@ -9,6 +9,48 @@ import type {
 export const SUPER_ACE_ROWS = 5;
 export const SUPER_ACE_COLS = 6;
 
+// Regular spin win/loss split: 30% win / 70% loss
+export const REGULAR_WIN_RATE = 0.30;
+
+// Scatter Free Spin schedule:
+// 1st regular spin -> guaranteed 10 Free Scatter Spins
+// 20th regular spin -> guaranteed 10 Free Scatter Spins
+// After 20th spin -> default 20% chance per regular spin
+export const DEFAULT_SCATTER_RATE = 0.20;
+export const FREE_SPINS_AWARDED = 10;
+
+// Two Wild Card Types:
+// 1) Regular Wild (WILD_SMALL) -> 35% appearance rate
+// 2) Multiple Wild (WILD_BIG, clones & multiplies win ×2) -> 25% appearance rate
+export const REGULAR_WILD_RATE = 0.35;
+export const MULTI_WILD_RATE = 0.25;
+
+// Buy Free Spin Scatter cost multiplier (Bet ₱1 -> Buy Cost ₱100)
+export const BUY_SPIN_COST_MULTIPLIER = 100;
+
+// Exact Buy Spin Winning Rate vs Result Rate Distribution:
+// Winning Rate: 10% + 15% + 20% + 25% + 30% = 100%
+// Result Rate:  40% + 20% + 15% + 15% + 10% = 100%
+export const BUY_SPIN_RESULT_TABLE = [
+  { winningRatePct: 10, resultRatePct: 40 },
+  { winningRatePct: 15, resultRatePct: 20 },
+  { winningRatePct: 20, resultRatePct: 15 },
+  { winningRatePct: 25, resultRatePct: 15 },
+  { winningRatePct: 30, resultRatePct: 10 },
+] as const;
+
+export function rollBuySpinWinningRatePct(): number {
+  const roll = Math.random() * 100;
+  let cumulative = 0;
+  for (const tier of BUY_SPIN_RESULT_TABLE) {
+    cumulative += tier.resultRatePct;
+    if (roll < cumulative) {
+      return tier.winningRatePct;
+    }
+  }
+  return BUY_SPIN_RESULT_TABLE[BUY_SPIN_RESULT_TABLE.length - 1].winningRatePct;
+}
+
 const REGULAR_SYMBOLS: SuperAceSymbol[] = [
   'ACE',
   'KING',
@@ -151,34 +193,36 @@ function generateNonWinningGrid(scatterCount: number): SuperAceCell[][] {
 function pickWinningClusterSize(wasFreeSpin: boolean): number {
   const roll = Math.random();
   if (wasFreeSpin) {
-    if (roll < 0.28) return 3;
-    if (roll < 0.56) return 4;
-    if (roll < 0.76) return 5;
-    if (roll < 0.88) return 6;
-    if (roll < 0.94) return 7;
-    if (roll < 0.98) return 8;
+    if (roll < 0.30) return 3;
+    if (roll < 0.58) return 4;
+    if (roll < 0.78) return 5;
+    if (roll < 0.90) return 6;
+    if (roll < 0.95) return 7;
+    if (roll < 0.985) return 8;
     return 9;
   }
-  if (roll < 0.40) return 3;
-  if (roll < 0.68) return 4;
-  if (roll < 0.84) return 5;
-  if (roll < 0.92) return 6;
-  if (roll < 0.96) return 7;
-  if (roll < 0.985) return 8;
+  if (roll < 0.42) return 3;
+  if (roll < 0.70) return 4;
+  if (roll < 0.85) return 5;
+  if (roll < 0.93) return 6;
+  if (roll < 0.965) return 7;
+  if (roll < 0.988) return 8;
   return 9;
 }
 
 /**
  * Generates a 6×5 grid seeded with a genuine left-to-right consecutive reel win
  * starting from Reel 1 (Col 0 -> Col 1 -> Col 2 [-> Col 3 -> Col 4 -> Col 5])
- * totaling `targetSize` matching boxes, plus optional Golden Cards on inner reels.
+ * totaling `targetSize` matching boxes, plus:
+ * - Regular Wild Card (WILD_SMALL) at 35% appearance rate
+ * - Multiple Wild Card (WILD_BIG, clones & multiplies win ×2) at 25% appearance rate
+ * - Optional Golden Cards on inner reels
  */
 function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperAceCell[][] {
   const grid = generateNonWinningGrid(scatterCount);
   const targetSize = pickWinningClusterSize(wasFreeSpin);
   const targetSymbol = pickRandom(REGULAR_SYMBOLS);
 
-  // Pick consecutive reel span (minimum 3 reels starting at Col 0, up to 6 reels)
   let numReels = 3;
   if (targetSize === 3) {
     numReels = 3;
@@ -186,13 +230,10 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
     numReels = Math.random() < 0.7 ? 4 : 3;
   } else if (targetSize === 5) {
     numReels = pickRandom([3, 4, 5]);
-  } else if (targetSize === 6) {
-    numReels = pickRandom([4, 5, 6]);
   } else {
     numReels = pickRandom([4, 5, 6]);
   }
 
-  // Helper to get a safe replacement symbol for Col 2 that won't create another unintended 3-reel match
   const pickSafeAlternative = (col: number): SuperAceSymbol => {
     const col0 = new Set<SuperAceSymbol>();
     const col1 = new Set<SuperAceSymbol>();
@@ -204,7 +245,6 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
       if (s === targetSymbol) return false;
       if (col === 2 && col0.has(s) && col1.has(s)) return false;
       if (col === 0 && col1.has(s)) {
-        // Avoid matching existing Col 2
         for (let r = 0; r < SUPER_ACE_ROWS; r++) {
           if (grid[r][2].symbol === s) return false;
         }
@@ -221,7 +261,7 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
       : pickRandom(REGULAR_SYMBOLS.filter((s) => s !== targetSymbol));
   };
 
-  // Clear any pre-existing targetSymbol inside columns 0..numReels so our exact boxCount is preserved
+  // Clear pre-existing targetSymbol inside columns 0..numReels so boxCount stays accurate
   for (let c = 0; c <= Math.min(numReels, SUPER_ACE_COLS - 1); c++) {
     for (let r = 0; r < SUPER_ACE_ROWS; r++) {
       if (!grid[r][c].isScatter && grid[r][c].symbol === targetSymbol) {
@@ -230,7 +270,7 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
     }
   }
 
-  // Step 1: Place 1 guaranteed targetSymbol in EVERY consecutive reel from Col 0 to numReels - 1
+  // Step 1: Place 1 guaranteed slot in EVERY consecutive reel from Col 0 to numReels - 1
   const placedPositions: Array<{ row: number; col: number }> = [];
   const placedSet = new Set<string>();
 
@@ -246,7 +286,7 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
     }
   }
 
-  // Step 2: Distribute any extra matching boxes (targetSize - numReels) across Col 0..numReels - 1
+  // Step 2: Distribute extra matching boxes across Col 0..numReels - 1
   const extraSlots: Array<{ row: number; col: number }> = [];
   for (let c = 0; c < numReels; c++) {
     for (let r = 0; r < SUPER_ACE_ROWS; r++) {
@@ -263,10 +303,40 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
     placedSet.add(`${slot.row},${slot.col}`);
   }
 
-  // Paint the consecutive winning boxes (with 1-2 Golden Cards on inner reels Col 1..4)
+  // Roll the 2 Wild Card types on inner winning positions (Col >= 1 so Reel 1 always anchors targetSymbol):
+  // - Regular Wild Card (WILD_SMALL): 35% chance
+  // - Multiple Wild Card (WILD_BIG): 25% chance
+  const innerPositions = placedPositions.filter((p) => p.col >= 1);
+  const spawnRegularWild = innerPositions.length > 0 && Math.random() < REGULAR_WILD_RATE;
+  const spawnMultiWild = innerPositions.length > 0 && Math.random() < MULTI_WILD_RATE;
+
+  let regularWildKey = '';
+  let multiWildKey = '';
+  if (innerPositions.length > 0) {
+    const shuffledInner = [...innerPositions].sort(() => Math.random() - 0.5);
+    if (spawnMultiWild && shuffledInner.length > 0) {
+      const p = shuffledInner.shift()!;
+      multiWildKey = `${p.row},${p.col}`;
+    }
+    if (spawnRegularWild && shuffledInner.length > 0) {
+      const p = shuffledInner.shift()!;
+      regularWildKey = `${p.row},${p.col}`;
+    }
+  }
+
+  // Paint the consecutive winning boxes
   let goldenPlaced = 0;
   for (const pos of placedPositions) {
-    const canBeGolden = pos.col >= 1 && pos.col <= 4 && goldenPlaced < 2 && Math.random() < 0.45;
+    const key = `${pos.row},${pos.col}`;
+    if (key === multiWildKey) {
+      grid[pos.row][pos.col] = makeCell('WILD_BIG');
+      continue;
+    }
+    if (key === regularWildKey) {
+      grid[pos.row][pos.col] = makeCell('WILD_SMALL');
+      continue;
+    }
+    const canBeGolden = pos.col >= 1 && pos.col <= 4 && goldenPlaced < 2 && Math.random() < 0.42;
     if (canBeGolden) goldenPlaced++;
     grid[pos.row][pos.col] = makeCell(targetSymbol, { isGolden: canBeGolden });
   }
@@ -278,42 +348,47 @@ function generateWinningGrid(scatterCount: number, wasFreeSpin: boolean): SuperA
  * Finds the best left-to-right consecutive reel win starting strictly from Reel 1 (Col 0).
  * A symbol (with Wild Jokers substituting) MUST appear on Reel 1 (Col 0), Reel 2 (Col 1),
  * AND Reel 3 (Col 2) consecutively (minimum 3 consecutive reels) before boxes break.
- * If Reel 2 (Col 1) has no matching symbol or Wild, the chain stops immediately and does NOT break.
- * If Reels 1..4 (or up to 1..6) all contain the matching symbol/Wild, ALL matching boxes across
- * those consecutive reels break together.
  */
 export function findBestWinningWays(
   grid: SuperAceCell[][]
-): { symbol: SuperAceSymbol; cells: Array<{ row: number; col: number }>; consecutiveReels: number } | null {
+): {
+  symbol: SuperAceSymbol;
+  cells: Array<{ row: number; col: number }>;
+  consecutiveReels: number;
+  multiWildPositions: Array<{ row: number; col: number }>;
+} | null {
   let best: {
     symbol: SuperAceSymbol;
     cells: Array<{ row: number; col: number }>;
     consecutiveReels: number;
+    multiWildPositions: Array<{ row: number; col: number }>;
   } | null = null;
 
   for (const sym of REGULAR_SYMBOLS) {
     const matchedCells: Array<{ row: number; col: number }> = [];
+    const multiWildPositions: Array<{ row: number; col: number }> = [];
     let consecutiveReels = 0;
     let hasPureSym = false;
 
     for (let c = 0; c < SUPER_ACE_COLS; c++) {
       const colMatches: Array<{ row: number; col: number }> = [];
+      const colMultiWilds: Array<{ row: number; col: number }> = [];
       for (let r = 0; r < SUPER_ACE_ROWS; r++) {
         const cell = grid[r][c];
         if (cell.symbol === sym || cell.isWild) {
           colMatches.push({ row: r, col: c });
           if (cell.symbol === sym) hasPureSym = true;
+          if (cell.symbol === 'WILD_BIG') colMultiWilds.push({ row: r, col: c });
         }
       }
 
-      // Strict consecutive rule: if this reel has NO matching symbol (or Wild), chain stops!
       if (colMatches.length === 0) break;
 
       matchedCells.push(...colMatches);
+      multiWildPositions.push(...colMultiWilds);
       consecutiveReels++;
     }
 
-    // Must span at least 1st, 2nd, and 3rd reels consecutively (Col 0, Col 1, Col 2)
     if (consecutiveReels >= 3 && hasPureSym) {
       const candidateVal = getBasePayoutForBoxes(matchedCells.length, sym);
       const bestVal = best ? getBasePayoutForBoxes(best.cells.length, best.symbol) : 0;
@@ -322,7 +397,7 @@ export function findBestWinningWays(
         candidateVal > bestVal ||
         (candidateVal === bestVal && consecutiveReels > best.consecutiveReels)
       ) {
-        best = { symbol: sym, cells: matchedCells, consecutiveReels };
+        best = { symbol: sym, cells: matchedCells, consecutiveReels, multiWildPositions };
       }
     }
   }
@@ -347,11 +422,20 @@ export interface EngineSpinInput {
   welcomeScatterEligible?: boolean;
 }
 
+export interface EngineBuySpinInput {
+  betAmount: number;
+  preSpinWallet: number;
+  state: SuperAcePlayerState;
+}
+
 export interface EngineSpinOutput {
   initialGrid: SuperAceCell[][];
   cascades: SuperAceCascadeStep[];
   finalGrid: SuperAceCell[][];
   wasFreeSpin: boolean;
+  wasBuySpin?: boolean;
+  buyCost?: number;
+  buyBonusRatePct?: number;
   effectiveBet: number;
   scatterCount: number;
   scatterPositions: Array<{ row: number; col: number }>;
@@ -362,54 +446,22 @@ export interface EngineSpinOutput {
   nextState: SuperAcePlayerState;
 }
 
-export function runSuperAceSpin(input: EngineSpinInput): EngineSpinOutput {
-  const { state, preSpinWallet } = input;
-  // Real Paid Spin Mode only (Free Spin Mode removed)
-  const wasFreeSpin = false;
-  const effectiveBet = input.betAmount;
-
-  const betWalletRatio = preSpinWallet > 0 ? Number((effectiveBet / preSpinWallet).toFixed(4)) : 0;
-
-  let dropThreeScatters = false;
-  let highBetBoostActive = false;
-
-  if (betWalletRatio >= 0.395 && betWalletRatio <= 0.55) {
-    highBetBoostActive = true;
-    dropThreeScatters = Math.random() < 0.12;
-  } else {
-    dropThreeScatters = Math.random() < 0.03;
-  }
-
-  let scatterCount = 0;
-  if (dropThreeScatters) {
-    scatterCount = 3;
-  } else if (Math.random() < 0.22) {
-    scatterCount = Math.random() < 0.65 ? 1 : 2;
-  }
-
-  // Real Spin Winning Rate (30% win chance per real paid spin)
-  const shouldWin = Math.random() < 0.30;
-
-  const initialGrid = shouldWin
-    ? generateWinningGrid(scatterCount, false)
-    : generateNonWinningGrid(scatterCount);
-
-  const scatterPositions = getScatterPositions(initialGrid);
-  const actualScatterCount = scatterPositions.length;
-  // No Free Spin Mode: 3+ Scatters pay an instant real cash bonus directly into totalWin
-  const triggeredFreeSpins = 0;
-  const scatterInstantBonus =
-    actualScatterCount >= 4
-      ? Number((effectiveBet * 20).toFixed(2))
-      : actualScatterCount >= 3
-        ? Number((effectiveBet * 10).toFixed(2))
-        : 0;
-
-  // Execute Cascading Box Breaks + Golden Card -> Joker Wild transformations
-  const multipliers = REGULAR_MULTIPLIERS;
+/**
+ * Executes cascades on an initial grid, handling:
+ * - Golden Card -> Regular Wild (35:25 ratio -> 58.3% Regular Wild / 41.7% Multi Wild)
+ * - Multiple Wild (WILD_BIG) cloning onto 2 extra cells + ×2 Wild Multiplier boost
+ * - Optional exact Buy Bonus payout budget scaling
+ */
+function resolveCascades(
+  initialGrid: SuperAceCell[][],
+  effectiveBet: number,
+  wasFreeSpin: boolean,
+  buySpinCapOrTarget?: { cap?: number; exactTarget?: number }
+): { cascades: SuperAceCascadeStep[]; finalGrid: SuperAceCell[][]; totalWin: number } {
+  const multipliers = wasFreeSpin ? FREE_SPIN_MULTIPLIERS : REGULAR_MULTIPLIERS;
   let workingGrid = cloneGrid(initialGrid);
   const cascades: SuperAceCascadeStep[] = [];
-  let totalWin = scatterInstantBonus;
+  let totalWin = 0;
   const MAX_CASCADES = 5;
 
   for (let step = 0; step < MAX_CASCADES; step++) {
@@ -419,50 +471,55 @@ export function runSuperAceSpin(input: EngineSpinInput): EngineSpinOutput {
     const mult = multipliers[Math.min(step, multipliers.length - 1)];
     const boxCount = match.cells.length;
     const basePayoutAt1Peso = getBasePayoutForBoxes(boxCount, match.symbol);
-    const stepWin = Number((basePayoutAt1Peso * effectiveBet * mult).toFixed(2));
+    // Multiple Wild Card (WILD_BIG) multiplies this cascade step win by ×2!
+    const wildMultiplier = match.multiWildPositions.length > 0 ? 2 : 1;
+    let stepWin = Number((basePayoutAt1Peso * effectiveBet * mult * wildMultiplier).toFixed(2));
     totalWin = Number((totalWin + stepWin).toFixed(2));
 
     const winSet = new Set(match.cells.map((p) => `${p.row},${p.col}`));
     const goldenTransformed: Array<{ row: number; col: number; wildType: 'WILD_SMALL' | 'WILD_BIG' }> = [];
     const bigJokerClones: Array<{ row: number; col: number }> = [];
 
-    // Mark broken cells; Golden Cards stay and transform into Small/Big Wild Joker!
+    // Mark broken cells; Golden Cards transform into Regular Wild (35w) or Multi Wild (25w)!
+    const multiWildRatio = MULTI_WILD_RATE / (REGULAR_WILD_RATE + MULTI_WILD_RATE);
     const nextGrid: (SuperAceCell | null)[][] = workingGrid.map((row, r) =>
       row.map((cell, c) => {
         if (!winSet.has(`${r},${c}`)) return { ...cell, isNew: false };
         if (cell.isGolden) {
-          const wildType: 'WILD_SMALL' | 'WILD_BIG' = Math.random() < 0.35 ? 'WILD_BIG' : 'WILD_SMALL';
+          const wildType: 'WILD_SMALL' | 'WILD_BIG' =
+            Math.random() < multiWildRatio ? 'WILD_BIG' : 'WILD_SMALL';
           goldenTransformed.push({ row: r, col: c, wildType });
           return makeCell(wildType, { isNew: true });
         }
-        return null; // broken box
+        return null;
       })
     );
 
-    // Big Joker feature: replicates onto 1-2 extra regular cells
-    for (const gt of goldenTransformed) {
-      if (gt.wildType === 'WILD_BIG') {
-        const candidates: Array<{ row: number; col: number }> = [];
-        for (let r = 0; r < SUPER_ACE_ROWS; r++) {
-          for (let c = 0; c < SUPER_ACE_COLS; c++) {
-            const cell = nextGrid[r][c];
-            if (cell && !cell.isWild && !cell.isScatter) {
-              candidates.push({ row: r, col: c });
-            }
+    // Multiple Wild feature: BOTH newly transformed WILD_BIG and broken WILD_BIG replicate onto 2 extra cells!
+    const multiWildTriggers =
+      goldenTransformed.filter((gt) => gt.wildType === 'WILD_BIG').length +
+      match.multiWildPositions.length;
+
+    if (multiWildTriggers > 0) {
+      const candidates: Array<{ row: number; col: number }> = [];
+      for (let r = 0; r < SUPER_ACE_ROWS; r++) {
+        for (let c = 0; c < SUPER_ACE_COLS; c++) {
+          const cell = nextGrid[r][c];
+          if (cell && !cell.isWild && !cell.isScatter) {
+            candidates.push({ row: r, col: c });
           }
         }
-        const cloneCount = Math.min(2, candidates.length);
-        for (let k = 0; k < cloneCount; k++) {
-          const pickIdx = Math.floor(Math.random() * candidates.length);
-          const target = candidates.splice(pickIdx, 1)[0];
-          nextGrid[target.row][target.col] = makeCell('WILD_SMALL', { isNew: true });
-          bigJokerClones.push(target);
-        }
+      }
+      const cloneCount = Math.min(2, candidates.length);
+      for (let k = 0; k < cloneCount; k++) {
+        const pickIdx = Math.floor(Math.random() * candidates.length);
+        const target = candidates.splice(pickIdx, 1)[0];
+        nextGrid[target.row][target.col] = makeCell('WILD_SMALL', { isNew: true });
+        bigJokerClones.push(target);
       }
     }
 
-    // Gravity drop per column & refill top empty boxes with fresh cards
-    // Keep cascade probability controlled so chain reactions feel exciting without exploding infinitely
+    // Gravity drop per column & refill top empty boxes
     for (let c = 0; c < SUPER_ACE_COLS; c++) {
       const survivors: SuperAceCell[] = [];
       for (let r = SUPER_ACE_ROWS - 1; r >= 0; r--) {
@@ -472,12 +529,10 @@ export function runSuperAceSpin(input: EngineSpinInput): EngineSpinOutput {
       const missing = SUPER_ACE_ROWS - survivors.length;
       const newCells: SuperAceCell[] = [];
       for (let m = 0; m < missing; m++) {
-        // Choose symbols with slight diversity to keep cascades realistic
         const sym = pickRandom(REGULAR_SYMBOLS);
         const isGolden = c >= 1 && c <= 4 && Math.random() < 0.12;
         newCells.push(makeCell(sym, { isGolden, isNew: true }));
       }
-      // survivors[0] is bottom row (SUPER_ACE_ROWS - 1)
       let writeRow = SUPER_ACE_ROWS - 1;
       for (const s of survivors) {
         nextGrid[writeRow][c] = s;
@@ -494,6 +549,7 @@ export function runSuperAceSpin(input: EngineSpinInput): EngineSpinOutput {
     cascades.push({
       stepIndex: step,
       multiplier: mult,
+      wildMultiplier,
       winningCells: match.cells,
       matchedSymbol: match.symbol,
       boxCount,
@@ -505,29 +561,221 @@ export function runSuperAceSpin(input: EngineSpinInput): EngineSpinOutput {
     });
   }
 
-  // Advance persistent Super Ace player state (Real Paid Mode — zero Free Spins)
+  // If this spin is part of a Buy Spin Bonus with a target payout budget, calibrate step wins cleanly
+  if (cascades.length > 0 && buySpinCapOrTarget) {
+    const desiredTotal =
+      buySpinCapOrTarget.exactTarget !== undefined
+        ? buySpinCapOrTarget.exactTarget
+        : buySpinCapOrTarget.cap !== undefined && totalWin > buySpinCapOrTarget.cap
+          ? buySpinCapOrTarget.cap
+          : null;
+
+    if (desiredTotal !== null && totalWin > 0) {
+      const ratio = desiredTotal / totalWin;
+      let running = 0;
+      for (let i = 0; i < cascades.length; i++) {
+        if (i === cascades.length - 1) {
+          cascades[i].stepWin = Math.max(0.01, Number((desiredTotal - running).toFixed(2)));
+        } else {
+          const scaled = Math.max(0.01, Number((cascades[i].stepWin * ratio).toFixed(2)));
+          cascades[i].stepWin = scaled;
+          running = Number((running + scaled).toFixed(2));
+        }
+      }
+      totalWin = Number(cascades.reduce((sum, c) => sum + c.stepWin, 0).toFixed(2));
+    }
+  }
+
+  return { cascades, finalGrid: workingGrid, totalWin };
+}
+
+/**
+ * Buy Free Spin Scatter:
+ * - Costs 100 × betAmount (e.g. ₱1 bet -> ₱100 Buy Free Spin Scatter)
+ * - Rolls exact Winning Rate vs Result Rate table:
+ *     10% win -> 40% result rate
+ *     15% win -> 20% result rate
+ *     20% win -> 15% result rate
+ *     25% win -> 15% result rate
+ *     30% win -> 10% result rate
+ * - Drops 3 Scatters and awards 10 Free Scatter Spins targeting that exact total return.
+ */
+export function runSuperAceBuySpin(input: EngineBuySpinInput): EngineSpinOutput {
+  const { betAmount, preSpinWallet, state } = input;
+  const buyCost = Number((betAmount * BUY_SPIN_COST_MULTIPLIER).toFixed(2));
+  const winningRatePct = rollBuySpinWinningRatePct();
+  const targetTotalWin = Number(((buyCost * winningRatePct) / 100).toFixed(2));
+
+  // Entry trigger grid with 3 Scatters (cleanly opens the 10 Free Scatter Spins bonus!)
+  const initialGrid = generateNonWinningGrid(3);
+  const scatterPositions = getScatterPositions(initialGrid);
+
   const nextState: SuperAcePlayerState = {
-    totalRegularSpins: state.totalRegularSpins + 1,
-    scattersTriggered:
-      actualScatterCount >= 3 ? state.scattersTriggered + 1 : state.scattersTriggered,
-    spinsSinceLastScatter: actualScatterCount >= 3 ? 0 : state.spinsSinceLastScatter + 1,
-    freeSpinsRemaining: 0,
-    freeSpinsTotal: 0,
-    freeSpinBet: effectiveBet,
+    totalRegularSpins: state.totalRegularSpins,
+    scattersTriggered: state.scattersTriggered + 1,
+    spinsSinceLastScatter: 0,
+    freeSpinsRemaining: FREE_SPINS_AWARDED,
+    freeSpinsTotal: FREE_SPINS_AWARDED,
+    freeSpinBet: betAmount,
     freeSpinTotalWin: 0,
+    buyBonusTargetWin: targetTotalWin,
+    buyBonusRatePct: winningRatePct,
   };
 
   return {
     initialGrid,
+    cascades: [],
+    finalGrid: cloneGrid(initialGrid),
+    wasFreeSpin: false,
+    wasBuySpin: true,
+    buyCost,
+    buyBonusRatePct: winningRatePct,
+    effectiveBet: betAmount,
+    scatterCount: scatterPositions.length,
+    scatterPositions,
+    triggeredFreeSpins: FREE_SPINS_AWARDED,
+    totalWin: 0,
+    highBetBoostActive: false,
+    betWalletRatio: preSpinWallet > 0 ? Number((buyCost / preSpinWallet).toFixed(4)) : 0,
+    nextState,
+  };
+}
+
+export function runSuperAceSpin(input: EngineSpinInput): EngineSpinOutput {
+  const { state, preSpinWallet } = input;
+  const wasFreeSpin = state.freeSpinsRemaining > 0;
+  const effectiveBet = wasFreeSpin ? state.freeSpinBet : input.betAmount;
+  const betWalletRatio = preSpinWallet > 0 ? Number((effectiveBet / preSpinWallet).toFixed(4)) : 0;
+
+  const isBuyBonusFreeSpin = wasFreeSpin && Number(state.buyBonusTargetWin || 0) > 0;
+
+  // Determine Scatter trigger according to exact schedule:
+  // 1) 1st regular spin (spin #1) -> guaranteed 3 Scatters (10 Free Scatter Spins)
+  // 2) 2nd..19th regular spins -> teaser only (0-2 scatters), saving next trigger for 20th spin
+  // 3) 20th regular spin (spin #20) -> guaranteed 3 Scatters (10 Free Scatter Spins)
+  // 4) After 20th spin (spin #21+) -> default 20% probability to drop 3 Scatters!
+  let dropThreeScatters = false;
+  const nextRegularSpinNum = state.totalRegularSpins + 1;
+
+  if (!wasFreeSpin) {
+    if (nextRegularSpinNum === 1) {
+      dropThreeScatters = true;
+    } else if (nextRegularSpinNum === 20) {
+      dropThreeScatters = true;
+    } else if (nextRegularSpinNum > 20) {
+      dropThreeScatters = Math.random() < DEFAULT_SCATTER_RATE;
+    } else {
+      dropThreeScatters = false;
+    }
+  } else if (!isBuyBonusFreeSpin) {
+    // Organic Free Spin retrigger (rare 8% chance during natural Free Spins)
+    dropThreeScatters = Math.random() < 0.08;
+  }
+
+  let scatterCount = 0;
+  if (dropThreeScatters) {
+    scatterCount = 3;
+  } else if (Math.random() < 0.22) {
+    scatterCount = Math.random() < 0.65 ? 1 : 2;
+  }
+
+  // Determine win/loss outcome:
+  // - Regular Paid Spin: strictly 30% win / 70% loss!
+  // - Buy Bonus Free Spin: paced across the 10 Free Spins so total Free Spin win lands cleanly on buyBonusTargetWin
+  // - Natural Free Spin: 38% win rate with ×2..×10 multipliers
+  let shouldWin = false;
+  let buyBudgetRule: { cap?: number; exactTarget?: number } | undefined;
+
+  if (!wasFreeSpin) {
+    shouldWin = Math.random() < REGULAR_WIN_RATE;
+  } else if (isBuyBonusFreeSpin) {
+    const targetWin = Number(state.buyBonusTargetWin || 0);
+    const remainingBudget = Math.max(0, Number((targetWin - state.freeSpinTotalWin).toFixed(2)));
+    const spinsLeftAfterThis = state.freeSpinsRemaining - 1;
+
+    if (spinsLeftAfterThis === 0) {
+      // Final spin of Buy Bonus: deliver exact remaining target win if any remains
+      if (remainingBudget >= 0.05) {
+        shouldWin = true;
+        buyBudgetRule = { exactTarget: remainingBudget };
+      } else {
+        shouldWin = false;
+      }
+    } else if (remainingBudget >= 0.1) {
+      // Spread wins naturally across the 10 Buy Free Spins (~45% win spins)
+      shouldWin = Math.random() < 0.45;
+      if (shouldWin) {
+        const share = Number((remainingBudget * (0.22 + Math.random() * 0.28)).toFixed(2));
+        buyBudgetRule = { cap: Math.max(0.1, Math.min(remainingBudget, share)) };
+      }
+    } else {
+      shouldWin = false;
+    }
+  } else {
+    // Natural Free Spin (triggered on 1st spin, 20th spin, or 20% default scatter)
+    shouldWin = Math.random() < 0.38;
+  }
+
+  const initialGrid = shouldWin
+    ? generateWinningGrid(scatterCount, wasFreeSpin)
+    : generateNonWinningGrid(scatterCount);
+
+  const scatterPositions = getScatterPositions(initialGrid);
+  const actualScatterCount = scatterPositions.length;
+
+  const { cascades, finalGrid, totalWin } = resolveCascades(
+    initialGrid,
+    effectiveBet,
+    wasFreeSpin,
+    buyBudgetRule
+  );
+
+  // Free Spins triggered by 3+ Scatters
+  const triggeredFreeSpins =
+    actualScatterCount >= 3 ? (wasFreeSpin ? 5 : FREE_SPINS_AWARDED) : 0;
+
+  let nextState: SuperAcePlayerState;
+  if (wasFreeSpin) {
+    const remainingAfter = Math.max(0, state.freeSpinsRemaining - 1) + triggeredFreeSpins;
+    const accumulatedWin = Number((state.freeSpinTotalWin + totalWin).toFixed(2));
+    nextState = {
+      totalRegularSpins: state.totalRegularSpins,
+      scattersTriggered:
+        actualScatterCount >= 3 ? state.scattersTriggered + 1 : state.scattersTriggered,
+      spinsSinceLastScatter: state.spinsSinceLastScatter,
+      freeSpinsRemaining: remainingAfter,
+      freeSpinsTotal: state.freeSpinsTotal + triggeredFreeSpins,
+      freeSpinBet: effectiveBet,
+      freeSpinTotalWin: accumulatedWin,
+      buyBonusTargetWin: remainingAfter > 0 ? Number(state.buyBonusTargetWin || 0) : 0,
+      buyBonusRatePct: remainingAfter > 0 ? Number(state.buyBonusRatePct || 0) : 0,
+    };
+  } else {
+    nextState = {
+      totalRegularSpins: nextRegularSpinNum,
+      scattersTriggered:
+        actualScatterCount >= 3 ? state.scattersTriggered + 1 : state.scattersTriggered,
+      spinsSinceLastScatter: actualScatterCount >= 3 ? 0 : state.spinsSinceLastScatter + 1,
+      freeSpinsRemaining: triggeredFreeSpins,
+      freeSpinsTotal: triggeredFreeSpins,
+      freeSpinBet: effectiveBet,
+      freeSpinTotalWin: 0,
+      buyBonusTargetWin: 0,
+      buyBonusRatePct: 0,
+    };
+  }
+
+  return {
+    initialGrid,
     cascades,
-    finalGrid: workingGrid,
+    finalGrid,
     wasFreeSpin,
     effectiveBet,
     scatterCount: actualScatterCount,
     scatterPositions,
     triggeredFreeSpins,
     totalWin,
-    highBetBoostActive,
+    highBetBoostActive: false,
     betWalletRatio,
     nextState,
   };

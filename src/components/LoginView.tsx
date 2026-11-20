@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, KeyRound, MapPin, UserPlus } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { PWAInstallButton } from './PWAControls';
+import lobbyHeroImg from '../assets/images/choyjiez_lobby_hero_1795073315513.jpg';
+import choyAppIconImg from '../assets/images/choyjiez_app_icon_1795076018851.jpg';
 
 interface LoginViewProps {
   gpsStatus: string;
@@ -65,7 +67,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
         {/* Hero Editorial Showcase Column */}
         <div className="lg:col-span-7 relative overflow-hidden rounded-3xl border border-emerald-800/80 bg-[#052920] min-h-[320px] lg:min-h-[540px] flex flex-col justify-end">
           <img
-            src="/src/assets/images/choyjiez_lobby_hero_1795073315513.jpg"
+            src={lobbyHeroImg}
             alt="Choy Card Game VIP emerald felt card table with fanned playing cards, gold chips, and wooden color dice"
             referrerPolicy="no-referrer"
             className="absolute inset-0 h-full w-full object-cover"
@@ -103,16 +105,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
           </div>
         </div>
 
-        {/* Auth Card Column */}
-        <div className="lg:col-span-5 rounded-3xl border border-emerald-800/80 bg-[#052920] p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
-          <div>
+        {/* Auth Card Column (Matched with 3D App Icon Background Image) */}
+        <div className="lg:col-span-5 relative overflow-hidden rounded-3xl border border-emerald-800/80 bg-[#052920] p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
+          <img
+            src={choyAppIconImg}
+            alt="Choy Card Game 3D player holding Joker playing card"
+            referrerPolicy="no-referrer"
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover object-top opacity-90"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#02140f] via-[#02140f]/80 to-[#02140f]/45" />
+
+          <div className="relative z-10">
             <PWAInstallButton variant="banner" />
-            <div className="flex items-center justify-between gap-2 border-b border-emerald-800/80 pb-4">
+            <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-4">
               <div>
-                <h2 className="font-display text-2xl font-extrabold text-white">
+                <h2 className="font-display text-2xl font-extrabold text-white drop-shadow">
                   {mode === 'login' ? 'Enter Arena' : 'Create Player Account'}
                 </h2>
-                <p className="text-xs text-emerald-300 mt-0.5">
+                <p className="text-xs text-emerald-200 mt-0.5 drop-shadow-xs">
                   {mode === 'login'
                     ? 'Sign in with your mobile number or Admin credentials'
                     : 'Create your player account to join live tables & slots'}
@@ -121,7 +131,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
             </div>
 
             {/* Segmented Mode Switch */}
-            <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl bg-[#031c16] p-1 border border-emerald-800/80">
+            <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl bg-[#031c16]/85 backdrop-blur-xs p-1 border border-emerald-700/80">
               <button
                 type="button"
                 onClick={() => {
@@ -171,39 +181,39 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="Enter your display name"
-                    className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16] px-3.5 py-2.5 text-sm text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16]/85 backdrop-blur-xs px-3.5 py-2.5 text-sm text-white focus:border-amber-400 focus:outline-none"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-medium text-emerald-200 mb-1">Mobile Number</label>
+                <label className="block text-xs font-medium text-emerald-100 mb-1">Mobile Number</label>
                 <input
                   type="text"
                   required
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="09XXXXXXXXX"
-                  className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16] px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16]/85 backdrop-blur-xs px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-emerald-200 mb-1">Password</label>
+                <label className="block text-xs font-medium text-emerald-100 mb-1">Password</label>
                 <input
                   type="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter password"
-                  className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16] px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16]/85 backdrop-blur-xs px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
                 />
               </div>
 
               {mode === 'register' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-emerald-200 mb-1">4-Digit Cashout PIN</label>
+                    <label className="block text-xs font-medium text-emerald-100 mb-1">4-Digit Cashout PIN</label>
                     <input
                       type="password"
                       maxLength={4}
@@ -211,17 +221,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
                       value={withdrawalPin}
                       onChange={(e) => setWithdrawalPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                       placeholder="4-digit PIN"
-                      className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16] px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
+                      className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16]/85 backdrop-blur-xs px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-emerald-200 mb-1">Referral Code (Optional)</label>
+                    <label className="block text-xs font-medium text-emerald-100 mb-1">Referral Code (Optional)</label>
                     <input
                       type="text"
                       value={referredBy}
                       onChange={(e) => setReferredBy(e.target.value)}
                       placeholder="Enter code"
-                      className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16] px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
+                      className="w-full rounded-xl border border-emerald-700/80 bg-[#031c16]/85 backdrop-blur-xs px-3.5 py-2.5 text-sm font-mono-num text-white focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -254,7 +264,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ gpsStatus, onAuthSuccess }
             </form>
           </div>
 
-          <div className="mt-6 border-t border-emerald-800/80 pt-4 text-xs text-emerald-300 leading-relaxed">
+          <div className="relative z-10 mt-6 border-t border-white/15 pt-4 text-xs text-emerald-200 leading-relaxed">
             New players can switch to <strong className="text-amber-300">Register Player</strong> above to create an account with a 4-digit withdrawal PIN and join live tables immediately.
           </div>
         </div>

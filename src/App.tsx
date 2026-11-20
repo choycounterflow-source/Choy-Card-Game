@@ -33,6 +33,7 @@ import { ShareAppModal } from './components/ShareAppModal';
 import { FALLBACK_SHARED_APP_URL, normalizeToPublicShareUrl } from './lib/shareUrl';
 import { exitGameFullscreen, requestGameFullscreenLandscape } from './lib/fullscreen';
 import { clearAppCacheAndReload } from './lib/cache';
+import choyAppIconImg from './assets/images/choyjiez_app_icon_1795076018851.jpg';
 
 type ActiveView = 'login' | 'player' | 'admin' | 'table' | 'ai_studio' | 'arena3d' | 'superace';
 
@@ -424,7 +425,7 @@ export default function App() {
             className="flex items-center gap-2.5 font-display text-lg font-extrabold tracking-tight text-amber-400 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <img
-              src="/src/assets/images/choyjiez_app_icon_1795076018851.jpg"
+              src={choyAppIconImg}
               alt="Choy Card Game App Icon"
               referrerPolicy="no-referrer"
               className="h-9 w-9 rounded-xl object-cover border border-amber-400/70 shadow-md"

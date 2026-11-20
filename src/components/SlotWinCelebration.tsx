@@ -401,7 +401,7 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
         ))}
       </div>
 
-      {/* Radial Golden Sparks & Firework Bursts */}
+      {/* Radial Golden Sparks & Firework Bursts (repeating cleanly across the full 5s highlight) */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
         {sparks.map((s) => {
           const dx = Math.cos(s.angleRad) * s.distancePx;
@@ -413,13 +413,15 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
               animate={{
                 x: dx,
                 y: dy,
-                scale: [0.3, 1.25, 0],
+                scale: [0.3, 1.35, 0],
                 opacity: [1, 1, 0],
-                rotate: s.isStar ? [0, 140] : 0,
+                rotate: s.isStar ? [0, 160] : 0,
               }}
               transition={{
-                duration: turboMode ? s.duration * 0.65 : s.duration,
-                delay: turboMode ? s.delay * 0.55 : s.delay,
+                duration: turboMode ? s.duration * 0.85 : s.duration * 1.15,
+                delay: s.delay,
+                repeat: Infinity,
+                repeatDelay: 0.45,
                 ease: 'easeOut',
               }}
               style={{
@@ -429,7 +431,7 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
               }}
             >
               {s.isStar ? (
-                <svg width={s.size * 1.4} height={s.size * 1.4} viewBox="0 0 20 20" fill={s.color}>
+                <svg width={s.size * 1.5} height={s.size * 1.5} viewBox="0 0 20 20" fill={s.color}>
                   <path d="M10 0 L12.4 7.6 L20 10 L12.4 12.4 L10 20 L7.6 12.4 L0 10 L7.6 7.6 Z" />
                 </svg>
               ) : (
@@ -440,7 +442,7 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
                     height: s.size,
                     borderRadius: '9999px',
                     backgroundColor: s.color,
-                    boxShadow: `0 0 10px ${s.color}`,
+                    boxShadow: `0 0 12px ${s.color}`,
                   }}
                 />
               )}
@@ -464,8 +466,10 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
                 rotate: [0, 220, 420],
               }}
               transition={{
-                duration: turboMode ? c.duration * 0.65 : c.duration,
-                delay: turboMode ? c.delay * 0.5 : c.delay,
+                duration: turboMode ? c.duration * 0.85 : c.duration * 1.1,
+                delay: c.delay,
+                repeat: Infinity,
+                repeatDelay: 0.6,
                 ease: 'easeOut',
               }}
               style={{
@@ -505,8 +509,8 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
 
         {/* Animated Crest Icon */}
         <motion.div
-          animate={{ scale: [1, 1.12, 1], rotate: [0, -5, 5, 0] }}
-          transition={{ duration: 0.9, repeat: Infinity, repeatDelay: 0.4 }}
+          animate={{ scale: [1, 1.14, 1], rotate: [0, -6, 6, 0] }}
+          transition={{ duration: 0.9, repeat: Infinity, repeatDelay: 0.3 }}
           className="mx-auto mb-2.5 flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-amber-200/80 bg-gradient-to-br from-amber-300 via-yellow-400 to-orange-500 text-emerald-950 shadow-[0_0_24px_rgba(251,191,36,0.75)]"
         >
           <EmblemIcon className="h-8 w-8 stroke-[2.4]" />
@@ -524,13 +528,31 @@ export const SlotWinCelebration: React.FC<SlotWinCelebrationProps> = ({
           {payload.subtitle}
         </p>
 
-        {/* Counting-Up Peso Odometer */}
+        {/* Sparkling Highlighted Win Amount Odometer */}
         {payload.amount !== undefined && (
-          <div className="mt-3 rounded-2xl border border-amber-300/40 bg-black/45 px-4 py-2.5 shadow-inner">
-            <p className="font-mono-num text-3xl sm:text-4xl font-black tracking-tight text-white drop-shadow-[0_2px_12px_rgba(251,191,36,0.6)]">
+          <motion.div
+            animate={{
+              boxShadow: [
+                '0 0 18px rgba(251,191,36,0.55)',
+                '0 0 38px rgba(254,240,138,0.95)',
+                '0 0 18px rgba(251,191,36,0.55)',
+              ],
+              scale: [1, 1.03, 1],
+            }}
+            transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+            className="relative mt-3 rounded-2xl border-2 border-amber-300 bg-gradient-to-b from-amber-950/90 via-black/75 to-amber-950/90 px-4 py-3 shadow-inner"
+          >
+            <Sparkles className="pointer-events-none absolute -top-2.5 -left-2.5 h-5 w-5 text-yellow-300 animate-pulse drop-shadow-[0_0_8px_rgba(254,240,138,0.95)]" />
+            <Sparkles className="pointer-events-none absolute -top-2.5 -right-2.5 h-5 w-5 text-amber-300 animate-pulse drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
+            <Sparkles className="pointer-events-none absolute -bottom-2 -left-2 h-4 w-4 text-amber-200 animate-bounce" />
+            <Sparkles className="pointer-events-none absolute -bottom-2 -right-2 h-4 w-4 text-yellow-200 animate-bounce" />
+            <span className="block text-[10px] font-extrabold uppercase tracking-[0.2em] text-amber-300 mb-0.5">
+              WIN AMOUNT
+            </span>
+            <p className="font-mono-num text-3xl sm:text-4xl font-black tracking-tight text-yellow-100 drop-shadow-[0_2px_14px_rgba(251,191,36,0.95)]">
               +₱{displayAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
-          </div>
+          </motion.div>
         )}
 
         <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-amber-200/75">
